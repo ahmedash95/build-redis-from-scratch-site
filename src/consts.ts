@@ -1,6 +1,6 @@
 export const SITE = {
-	title: 'Documentation',
-	description: 'Your website description.',
+	title: 'Build Redis from scratch',
+	description: 'Build Redis from scratch in Golang with no external dependencies',
 	defaultLanguage: 'en-us',
 } as const;
 
