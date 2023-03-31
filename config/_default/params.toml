@@ -2,8 +2,8 @@
 
 ## Homepage
 title = "بناء Redis من الصفر"
-titleSeparator = ""
-titleAddition = ""
+titleSeparator = "-"
+titleAddition = "باستخدام Go"
 description = "كيفيه بناء Redis clone من الصفر باستخدام GoLang"
 
 ## Documentation
@@ -86,7 +86,7 @@ editPage = true
 lastMod = false
 
 [sections]
-  sectionNav = ["docs", "guides"]
+  sectionNav = []
 
 [options]
   lazySizes = true

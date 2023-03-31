@@ -52,7 +52,3 @@ See what others have build with Doks. [Showcase →](https://getdoks.org/showcas
 ## Contributing
 
 Find out how to contribute to Doks. [Contributing →](https://getdoks.org/docs/contributing/how-to-contribute/)
-
-## Help
-
-Get help on Doks. [Help →]({{< relref "how-to-update" >}})
