@@ -44,6 +44,7 @@ export const SIDEBAR: Sidebar = {
 	ar: {
 		'الفهرس': [
 			{ text: 'مقدمة', link: 'ar/introduction' },
+			{ text: 'الخطوات الاولي', link: 'ar/first-steps' },
 			{ text: 'بناء الخادم', link: 'ar/writing-server' },
 			{ text: 'القراءة من RESP', link: 'ar/resp-reader' },
 			{ text: 'الكتابة الي RESP', link: 'ar/resp-writer' },

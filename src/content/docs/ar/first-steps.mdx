@@ -1,0 +1,122 @@
+---
+title: "الخطوات الاولي"
+description: ""
+---
+
+### كتابة Main.go
+
+اثناء كتابه المشروع مش هنستخدم اي مكتبات خارجية و ده لان كل اللي احنا محتاجينه متوفر في Go نفسها. ف كل اللي انت محتاجه انك تبدا
+مشروع Go جديد و تجهز الـ Main.go
+
+```go
+package main
+
+import (
+    "fmt"
+)
+
+func main() {
+    fmt.Println("Hello World")
+}
+```
+
+### تجهيز الـ Client
+
+الـ InMemory Database اللي احنا هنكتبها هنقول عليها دايما `Server` و ده لانها Database Server زي MySQL او Redis Server.
+
+وبما ان الـServer دايما بيحتاج `Client` يكلمه ف احنا كمان هنحتاج client علشان نجرب الكود اللي هنكتبه ده و نشوف شغال ازاي.
+ف اسهل حاجه هنجربها هي Redis Client وده لانه سهل الاستخدام و كمان علشان ال Server اللي هنكتبه هيبقي متوافق مع Redis.
+
+و متوافق هنا مقصود بيها ان اي client بيعرف يكلم Redis ف هو هيعرف يكلم السيرفر بتاعنا.
+
+تقدر تسطب Redis و الـ Client بتاعه من الموقع الرسمي لـ [Redis هنا](https://redis.io/docs/getting-started/installation/)
+
+وبعدها علي طول جرب
+
+```bash
+$ redis-cli ping
+
+PONG
+```
+
+واخر خطوه محتاج تعملها بعد كدا انك  تقفل Redis Server لان الكود بتاعنا والسيرفر بتاعنا هيستخدم نفس الـ Port.
+
+- لو انت علي ماك
+```
+$ brew services stop redis
+```
+
+- لو انت علي لينكس
+```bash
+$ sudo systemctl stop redis
+```
+
+### ازاي Redis بيشتغل
+
+خلينا الاول نشرح امثله لـRedis بيشتغل ازاي. مثلا الـ Strings بتسجل بيه key, value.
+
+ الـKey هيبقي string والـvalue هتبقي serialized object من اي type زي array, integer, boolean
+
+
+```bash
+SET admin ahmed
+```
+
+```bash
+> GET admin
+
+"ahmed"
+```
+
+
+
+الطريقة اللي Redis بيستقبل بيها الاوامر دي عن طريق Serialization Protocol اسمه [RESP (Redis serialization protocol)](https://redis.io/docs/reference/protocol-spec/).
+
+ف لو بصينا ازاي `SET admin ahmed` بيتم ارسالها كـ serialized message لـRedis هتبقي بالشكل ده
+
+
+```bash
+*3\r\n$3\r\nset\r\n$5\r\nadmin\r\n$5\r\nahmed
+```
+
+
+وعلشان نبسط شكلها اكتر
+
+
+```bash
+*3
+$3
+set
+$5
+admin
+$5
+ahmed
+```
+
+
+لو بصيت علي الـRESP هتلاقيه بيقولنا كل علامه من دول ايه معناها
+
+- '*' بتقول ان عندنا array حجمها 3.. بالتالي احنا هنقرا 6 سطور. كل سطرين بيمثلو نوع الobject و حجمه و السطر التاني قيمه الاوبجكت ده
+- '$' بتقول انه string عدد حروفه 5. اذن السطر اللي بعده هيبقي فيه 5 حروف فقط
+
+
+بردو لما بنقول `GET admin` بيرجع نفس شكل الـObject مع اختلاف القيم
+
+
+
+
+```bash
+$5\r\nahmed\r\n
+```
+
+```bash
+$5
+ahmed
+```
+
+
+ف اللي احنا هنعمله اننا هنبني نفس الـserializer ومن خلاله هنقدر نكلم الـ Server بتاعنا باي Redis Client علشان نبعتله commands زي Redis بالظبط.
+
+
+
+وبكدا يبقي احنا جاهزين نبدا بناء الـ Database بتاعنا.

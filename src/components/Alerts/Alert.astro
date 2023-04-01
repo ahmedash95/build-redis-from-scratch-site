@@ -1,0 +1,33 @@
+---
+type Props = {
+	message: string;
+    type: 'danger' | 'warning' | 'info';
+};
+const { message, type } = Astro.props;
+const classes = ['alert', type].join(' ');
+---
+
+<!-- implement warning box with inline css style -->
+<div class={classes}>
+    <!-- check if type is info -->
+    {type === 'info' && <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g id="Warning / Info">
+        <path id="Vector" d="M12 11V16M12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12C21 16.9706 16.9706 21 12 21ZM12.0498 8V8.1L11.9502 8.1002V8H12.0498Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        </svg>
+    }
+    <!-- check if type is warning -->
+    {type === 'warning' && <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 15H12.01M12 12V9M4.98207 19H19.0179C20.5615 19 21.5233 17.3256 20.7455 15.9923L13.7276 3.96153C12.9558 2.63852 11.0442 2.63852 10.2724 3.96153L3.25452 15.9923C2.47675 17.3256 3.43849 19 4.98207 19Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    }
+    <!-- check if type is danger -->
+    {type === 'danger' && <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g id="Warning / Stop_Sign">
+        <path id="Vector" d="M5.75 5.75L18.25 18.25M12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12C21 16.9706 16.9706 21 12 21Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        </svg>
+    }
+
+    <span style="margin-top: 0; margin-bottom: 0;">{message}</span>
+</div>

@@ -1,0 +1,127 @@
+---
+title: "كتابه السيرفر"
+description: ""
+---
+
+
+
+### الجزء الاول: بناء المشروع
+
+بافتراض انك تعرف Golang و كتبت بيها قبل كدا. كل اللي هنحتاج نعمله في الـ main اننا هنعمل server و نستخدم نفس Redis port اللي هو 6379. وهنبدا نستقبل connections و نرد ب message واحده بتقول Ok
+
+
+الوا محتاجين نبدا TCP listener علشان اي client يقدر يكلمه
+
+
+```go
+l, err := net.Listen("tcp", ":6379")
+if err != nil {
+    fmt.Println(err)
+    return
+}
+```
+
+
+بعدين هنبدا نستقبل requests
+
+
+```go
+conn, err := l.Accept()
+if err != nil {
+    fmt.Println(err)
+    return
+}
+
+defer conn.Close() // close connection once finished
+```
+
+
+بعدها هنعمل inifine loop و نستقبل commands من ال clients و قندر نرد عليهم
+
+
+```go
+for {
+    buf := make([]byte, 1024)
+
+    // read message from client
+    _, err = conn.Read(buf)
+    if err != nil {
+        if err == io.EOF {
+            break
+        }
+        fmt.Println("error reading from client: ", err.Error())
+        os.Exit(1)
+    }
+
+    // ignore request and send back a PONG
+    conn.Write([]byte("+OK\r\n"))
+}
+```
+
+
+خلي بالك في اخر سطر احنا بنرد بـ Ok اي كان ال command اللي بيجيلنا من ال client.
+
+بالتالي الكود كله هيبقي
+
+
+
+```go
+package main
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+)
+
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		buf := make([]byte, 1024)
+
+		// read message from client
+		_, err = conn.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			fmt.Println("error reading from client: ", err.Error())
+			os.Exit(1)
+		}
+
+		// ignore request and send back a PONG
+		conn.Write([]byte("+OK\r\n"))
+	}
+}
+```
+
+
+
+لو جربنا نشغل الـserver و نكلمه بـ redis-cli هنقدر نشوف الـResponse اللي متوقعينه
+
+![CLI OUTPUT](/images/build-redis-from-scratch/part-1/cli-output.png)
+
+## الخاتمه
+
+كدا احنا خلصنا اول جزء و اللي فيه عملنا server يقدر اي redis client يكلمه و يستقبل منه responses.
+
+حاليا هو ريسبونس واحد Ok. ولكن في المقالات الجايه هنبدا نغير ده علشان نرد علي اوامر زي set, get, hset, hset.
+
