@@ -7,12 +7,11 @@ export const SITE = {
 
 export const OPEN_GRAPH = {
 	image: {
-		src: 'https://github.com/withastro/astro/blob/main/.github/assets/banner.png?raw=true',
+		src: 'https://www.build-redis-from-scratch.dev/images/thumb.png',
 		alt:
-			'astro logo on a starry expanse of space,' +
-			' with a purple saturn-like planet floating in the right foreground',
+			'build redis clone from scratch in go',
 	},
-	twitter: 'astrodotbuild',
+	twitter: 'ahmedash95',
 };
 
 export const KNOWN_LANGUAGES = {
