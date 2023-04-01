@@ -1,14 +1,6 @@
 ---
 title: "قراءة الـ RESP"
 description: ""
-lead: ""
-date: 2023-03-30T00:00:00+02:00
-lastmod: 2023-03-30T00:00:00+02:00
-draft: false
-images: []
-
-weight: 2
-toc: true
 ---
 
 بسم الله الرحمن الرحيم

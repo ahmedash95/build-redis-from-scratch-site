@@ -1,16 +1,6 @@
 ---
 title: "كتابه السيرفر"
 description: ""
-lead: ""
-date: 2023-03-30T00:01:00+02:00
-lastmod: 2023-03-30T01:00:00+02:00
-draft: false
-images: []
-menu:
-  docs:
-    parent: "docs"
-weight: 1
-toc: true
 ---
 
 ## مقدمة

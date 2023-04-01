@@ -1,13 +1,6 @@
 ---
 title: "كتابة البيانات علي الـDisk"
 description: ""
-lead: ""
-date: 2023-03-30T00:00:00+02:00
-lastmod: 2023-03-30T00:00:00+02:00
-draft: false
-images: []
-weight: 1300
-toc: true
 ---
 
 
