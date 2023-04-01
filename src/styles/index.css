@@ -211,6 +211,10 @@ pre > code {
 	font-size: 1em;
 }
 
+pre.astro-code {
+	direction: ltr!important;
+}
+
 table,
 pre {
 	position: relative;

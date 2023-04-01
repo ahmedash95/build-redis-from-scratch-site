@@ -1,0 +1,599 @@
+---
+title: "قراءة الـ RESP"
+description: ""
+lead: ""
+date: 2023-03-30T00:00:00+02:00
+lastmod: 2023-03-30T00:00:00+02:00
+draft: false
+images: []
+
+weight: 2
+toc: true
+---
+
+بسم الله الرحمن الرحيم
+بسم الله الرحمن الرحيم
+
+في الجزء الثاني من السلسله هنبدا نشتغل علي الـ RESP (Redis Serialization Protocol) ونبدا نستقبل الاوامر و نقدر نرد عليها.
+
+احنا شرحنا ف الجزء الاول ازاي RESP بيعمل serialize لمختلف البيانات. ف اللي هنركز عليه واحنا بنكتب الRESP انه يقدر يعمل deserialize  و serialize بشكل صحيح.
+
+
+# ازاي نتعامل مع الـ IO
+
+علشان نعرف نكتب الـ Parser محتاجين نفهم ايه هو شكل الinput اللي هنستقبله علشان نعمله parse. في GoLang في كذا مكتبه بتساعدنا نتعامل مع الـ IO بس احنا هنستخدم منهم [Bufio](https://golang.org/pkg/bufio/) و هنختارها علشان فيها methods هتساعدنا نتعامل مع البيانات بشكل اسرع زي ReadLine, ReadByte.
+
+ف مثلا لو استقبلنا من الـ Client بيانات عباره عن String مكتوب كـ RESP
+
+
+```bash
+$5\r\nAhmed\r\n
+```
+
+
+ف احنا اللي هنحتاجه اننا نقرا اول byte اللي هي $ علشان نعرف ايه نوع الdata اللي هنبدا نقرها. و بعدين هنقرا الرقم علشان نعرف عدد الbytes اللي محتاجين نقراها اللي هو 5 بالاضافه الي 2 bytes كمان اللي هي \r\n.
+
+
+### تعالي نشوف ازاي نعمل كدا
+
+- هنعمل string و نحوله ل bufio buffer
+
+
+```go
+input := "$5\r\nAhmed\r\n"
+
+reader := bufio.NewReader(strings.NewReader(input))
+```
+
+
+دلوقتي علشان نقرا الاسم من الـ RESP string ده محتاجين نعمل كذا خطوه
+
+-  نقرا نوع الـ data type اللي هي اول byte ف ال buffer
+- بعدين هنقرا الرقم اللي هو بيعبر عن حجم النص اللي محتاجين نقراه
+- بعدين نعمل byte array بحجم الرقم اللي قريناه و نقرا ال bytes دي
+- وكدا بقي معانا الـ String اللي هنستقبل زيه من Client
+
+- هنقرا اول byte علشان نعرف نوع الـ data type
+
+
+```go
+b, _ := reader.ReadByte()
+
+if b != '$' {
+    fmt.Println("Invalid type, expecting bulk strings only")
+    os.Exit(1)
+}
+```
+
+
+- بعدين نقرا الرقم علشان نعرف عدد حروف النص اللي هنقراه
+
+
+```go
+size, _ := reader.ReadByte()
+
+strSize, _ := strconv.ParseInt(string(size), 10, 64)
+
+// consume /r/n
+reader.ReadByte()
+reader.ReadByte()
+```
+
+
+بالشكل ده كدا احنا قرانا ال byte اللي بتعرفنا ال data type و بعدها الرقم اللي بيقولنا عدد حروف النص اللي هنقراه. و بعدين هنقرا 2 bytes كمان علشان نتخلص من \r\n اللي بيتبع الرقم.
+
+وبكدا ال reader object بتاعنا واقف عند ال byte رقم 5 اللي هي حرف A.
+
+
+```go
+$
+5
+\r
+\n
+A
+h
+m
+e
+d
+\r
+\n
+```
+
+
+
+وبما اننا عارفين عدد الحروف او الـbytes اللي هنقراها ف محتاجين بس نعمل buffer array و نقراها
+
+
+```go
+name := make([]byte, strSize)
+reader.Read(name)
+
+fmt.Println(string(name))
+```
+
+
+و بالطريقه دي هنبني الـ Parser علشان نقدر نهادل كل ال RESP commands. وده الكود كامل اللي كتابنه علي مراحل فوق
+
+
+```go
+package main
+
+import (
+    "bufio"
+    "fmt"
+    "strings"
+    "os"
+    "strconv"
+)
+
+func main() {
+    input := "$5\r\nAhmed\r\n"
+    reader := bufio.NewReader(strings.NewReader(input))
+
+    b, _ := reader.ReadByte()
+
+    if b != '$' {
+      fmt.Println("Invalid type, expecting bulk strings only")
+      os.Exit(1)
+    }
+
+    size, _ := reader.ReadByte()
+
+    strSize, _ := strconv.ParseInt(string(size), 10, 64)
+
+    // consume /r/n
+    reader.ReadByte()
+    reader.ReadByte()
+
+    name := make([]byte, strSize)
+    reader.Read(name)
+
+    fmt.Println(string(name))
+}
+```
+
+
+
+# كتابة الـ RESP
+
+هنعمل ملف جديد resp.go علشان يبقي فيه كل الكود اللي بيخص ال serialize and deserialize علي الـ buffer
+
+اولا علشان نسهل علي نفسنا التعامل مع الـ data type. هنعرف constants بتعبر عن كل نوع ف يبقي سهل علينا نقراه
+
+
+```go
+const (
+	STRING  = '+'
+	ERROR   = '-'
+	INTEGER = ':'
+	BULK    = '$'
+	ARRAY   = '*'
+)
+```
+
+
+وبعدين هنعرف struct علشان نستخدمه في عمليه ال serialize and deserialze ويشيل كل ال commands و ال arguments اللي هنستقبلها من الـ Client
+
+
+```go
+type Value struct {
+	typ   string
+	str   string
+	num   int
+	bulk  string
+	array []Value
+}
+```
+
+
+**للتوضيح:**
+
+- **typ** علشان نعرف نوع الـ data type اللي شايلها الـ [*value*](https://redis.io/docs/reference/protocol-spec/#resp-protocol-description)
+- **str** هتشيل قيمه الـ string اللي هيجي من الـ [*simple strings*](https://redis.io/docs/reference/protocol-spec/#resp-simple-strings)
+- **num** هتشيل قيمه الـ integer اللي هيجي من الـ [*integers*](https://redis.io/docs/reference/protocol-spec/#resp-integers)
+- **bulk** علشان نخزن النص اللي هنستقبله من ال [*bulk strings*](https://redis.io/docs/reference/protocol-spec/#resp-bulk-strings)
+- **array** هتشيل كل ال values اللي هيجي من الـ [*arrays*](https://redis.io/docs/reference/protocol-spec/#resp-arrays)
+
+
+دلوقتي احنا عندنا Value struct هيسهل علينا نعمل parsing/deserialize للـ RESP commands. ف هنعمل دلوقتي Reader علشان يبقي فيه كل الميثودز اللي هتساعدنا نقرا من ال buffer و نخزنها في الـ Value struct
+
+
+```go
+type Resp struct {
+	reader *bufio.Reader
+}
+
+func NewResp(rd io.Reader) *Resp {
+	return &Resp{reader: bufio.NewReader(rd)}
+}
+```
+
+
+الـ NewResp هنستخدمها قدام عنلشان نبعتلها الـ buffer من الـ Connection اللي كتبناه في Part 1
+
+في المرحله دي هنعمل 2 functions هيساعدونا بشكل اساسي في عمليه ال parsing
+- **readLine** هتقرا الـ line اللي هيجي من الـ buffer
+- **readIntger** هتقرا الـ integer اللي هيجي من الـ buffer
+
+ودول هنعملهم بنفسنا علشان ال bufio مفيهاش ميثودز تعمل ده
+
+- ReadLine
+
+
+```go
+func (r *Resp) readLine() (line []byte, n int, err error) {
+	for {
+		b, err := r.reader.ReadByte()
+		if err != nil {
+			return nil, 0, err
+		}
+		n += 1
+		line = append(line, b)
+		if len(line) >= 2 && line[len(line)-2] == '\r' {
+			break
+		}
+	}
+	return line[:len(line)-2], n, nil
+}
+```
+
+
+ف الميثودز هنا احنا هنعمل loop و نقرا one byte كل مره لغايه ما نوصل لـ **r/** و بكدا نكون عرفنا ان ده اخر حرف في الـ line
+بعد كدا هنرجع ال line من غير اخر 2 bytes اللي همي **r/** و **n/**. و عدد ال bytes اللي موجوده ف ال byte ده
+
+- ReadIntger
+
+
+```go
+func (r *Resp) readInteger() (x int, n int, err error) {
+	line, n, err := r.readLine()
+	if err != nil {
+		return 0, 0, err
+	}
+	i64, err := strconv.ParseInt(string(line), 10, 64)
+	if err != nil {
+		return 0, n, err
+	}
+	return int(i64), n, nil
+}
+```
+
+
+
+# عمليه الـ Parsing او الـ Deserialize
+
+عملنا الـ structs والـ methods اللي هتسهل علينا نقرا من الـ buffer. ف هنبدا دلوقتي نعمل الميثود اللي هتبدا تقرا من ال
+buffer بشكل recursive. و ال recursive هنا علشان الـ RESP command بيبقي nested types ف محتاجين في كل خطوه من ال input اللي جاي
+اننا نعمل Read للـ Value اللي جاي
+
+
+```go
+func (r *Resp) Read() (Value, error) {
+	_type, err := r.reader.ReadByte()
+
+	if err != nil {
+		return Value{}, err
+	}
+
+	switch _type {
+	case ARRAY:
+		return r.readArray()
+	case BULK:
+		return r.readBulk()
+	default:
+		fmt.Printf("Unknown type: %v", string(_type))
+		return Value{}, nil
+	}
+}
+```
+
+
+زي ما عملنا ف اول خطوه، هنقرا اول byte علشان نعرف نوع ال RESP type اللي هنعملها parse. بعد كدا هنمل switch و حسب ال type هنبدا نعملها parse.
+
+حاليا هنكتفي ب Array and Bulk.
+
+
+دلوقتي هنعمل الـ ReadArray لان ده اول command بيجيلنا من ال clients دايما
+
+قبل ما نكتب الميثود، خليك فاكر ان الـ array resp بيبقي شكلها كدا
+
+
+```bash
+*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n
+```
+
+
+علشان نسهل و ونوضح شكلها  ممكن نقسمها لسطور بدل /r/n
+
+
+```bash
+*2
+$5
+hello
+$5
+world
+```
+
+
+ف احنا علشان نقرا الـ Array هنعمل الخطوات كالتالي:
+
+- هنفوت اول byte لان دي احنا قراناها بالفعل في ميثود الـ Read
+- هنقرا الـ integer اللي هيبقي عدد ال elements اللي هيجي في الـ array
+- هنعمل loop علي الـ array و لكل سطر هنكلم Read method علشان تعمل parse للـ type حسب الحرف في اول السطر
+- ومع كل loop هنعمل append للـ array في الـ Value object و نرجعها
+
+
+```go
+func (r *Resp) readArray() (Value, error) {
+	v := Value{}
+	v.typ = "array"
+
+	// read length of array
+	len, _, err := r.readInteger()
+	if err != nil {
+		return v, err
+	}
+
+	// foreach line, parse and read the value
+	v.array = make([]Value, 0)
+	for i := 0; i < len; i++ {
+		val, err := r.Read()
+		if err != nil {
+			return v, err
+		}
+
+		// append parsed value to array
+		v.array = append(v.array, val)
+	}
+
+	return v, nil
+}
+```
+
+
+
+دلوقتي الكود علشان يكمل و الـ Parser يشتغل لازم نعمل implement للـ Bulk type علشان readArray تعرف ترجعلنا value
+
+احنا عدينا علي الـ bulk strings بس خلينا نعرف شكلها تاني بشكل سريع
+
+
+```bash
+# $5\r\nhello\r\n
+$5
+hello
+```
+
+
+ف احنا هنعمل الخطوات كالتالي:
+
+- هنفوت اول byte لان دي احنا قراناها بالفعل في ميثود الـ Read
+- هنقرا الـ integer اللي هيبقي عدد ال bytes اللي هيجي في الـ bulk string
+- هنقرا الـ bulk string بعد كدا هنقرا الـ \r\n اللي هيبقي اخر 2 bytes
+- هنرجع الـ Value object
+
+
+```go
+func (r *Resp) readBulk() (Value, error) {
+	v := Value{}
+
+	v.typ = "bulk"
+
+	len, _, err := r.readInteger()
+	if err != nil {
+		return v, err
+	}
+
+	bulk := make([]byte, len)
+
+	r.reader.Read(bulk)
+
+	v.bulk = string(bulk)
+
+	// Read the trailing CRLF
+	r.readLine()
+
+	return v, nil
+}
+```
+
+
+خلي بالك هنا من اننا عملنا `r.readLine()` بعد ما قرانا ال string علشان نقرا الـ \r\n بتبقي في اخر كل bulk string والا ال
+الـ pointer هيبقي واقف علي /r و ساعتها الـ Read مش هتعرف تقرا الـ bulk string اللي بعدها بشكل مظبوط
+
+
+وهنا يبقي ال RESP.go فيه كل اللي احنا محتاجينه علشان نعمل parse and deserialize للـ RESP
+
+
+```go
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"strconv"
+)
+
+const (
+	STRING  = '+'
+	ERROR   = '-'
+	INTEGER = ':'
+	BULK    = '$'
+	ARRAY   = '*'
+)
+
+type Value struct {
+	typ   string
+	str   string
+	num   int
+	bulk  string
+	array []Value
+}
+
+type Resp struct {
+	reader *bufio.Reader
+}
+
+func NewResp(rd io.Reader) *Resp {
+	return &Resp{reader: bufio.NewReader(rd)}
+}
+
+func (r *Resp) readLine() (line []byte, n int, err error) {
+	for {
+		b, err := r.reader.ReadByte()
+		if err != nil {
+			return nil, 0, err
+		}
+		n += 1
+		line = append(line, b)
+		if len(line) >= 2 && line[len(line)-2] == '\r' {
+			break
+		}
+	}
+	return line[:len(line)-2], n, nil
+}
+
+func (r *Resp) readInteger() (x int, n int, err error) {
+	line, n, err := r.readLine()
+	if err != nil {
+		return 0, 0, err
+	}
+	i64, err := strconv.ParseInt(string(line), 10, 64)
+	if err != nil {
+		return 0, n, err
+	}
+	return int(i64), n, nil
+}
+
+func (r *Resp) Read() (Value, error) {
+	_type, err := r.reader.ReadByte()
+
+	if err != nil {
+		return Value{}, err
+	}
+
+	switch _type {
+	case ARRAY:
+		return r.readArray()
+	case BULK:
+		return r.readBulk()
+	default:
+		fmt.Printf("Unknown type: %v", string(_type))
+		return Value{}, nil
+	}
+}
+
+func (r *Resp) readArray() (Value, error) {
+	v := Value{}
+	v.typ = "array"
+
+	// read length of array
+	len, _, err := r.readInteger()
+	if err != nil {
+		return v, err
+	}
+
+	// foreach line, parse and read the value
+	v.array = make([]Value, 0)
+	for i := 0; i < len; i++ {
+		val, err := r.Read()
+		if err != nil {
+			return v, err
+		}
+
+		// append parsed value to array
+		v.array = append(v.array, val)
+	}
+
+	return v, nil
+}
+
+func (r *Resp) readBulk() (Value, error) {
+	v := Value{}
+
+	v.typ = "bulk"
+
+	len, _, err := r.readInteger()
+	if err != nil {
+		return v, err
+	}
+
+	bulk := make([]byte, len)
+
+	r.reader.Read(bulk)
+
+	v.bulk = string(bulk)
+
+	// Read the trailing CRLF
+	r.readLine()
+
+	return v, nil
+}
+```
+
+
+
+
+# الخاتمه
+
+وبكدا نبقي عملنا Deserialize للـ RESP بالـ Reader و نقدر نغير في الـ main.go علشان نقرا الـ Commands
+
+
+```go
+package main
+
+import (
+	"fmt"
+	"net"
+)
+
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		resp := NewResp(conn)
+		value, err := resp.Read()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		fmt.Println(value)
+
+		// ignore request and send back a PONG
+		conn.Write([]byte("+OK\r\n"))
+	}
+}
+```
+
+
+
+ولو جربنا نعمل connect من redis-cli هنشوف ال output كدا
+
+![cli output](/images/build-redis-from-scratch/part-2/cli-output.png)
+
+تجاهل السطر التاني لان redis-cli اول ما بيعمل connect بيبعت [COMMAND DOCS](https://redis.io/commands/command-docs/) ودي
+احنا هنتجاهلها دلوقتي.
+
+بس لو شفت السطر الثالث .. هتلاقي الـ print Value فيها نفس عدد ال strings اللي بعتناها من redis-cli ع اليمين
+
+الجزء اللي جاي  هنبدا نرد علي PING command و نعمل serialize للـ Value response علي الـ Writer و نرد بيه علي الـ Client
+واللي منها بعد كدا هنقدر نعمل implement لاي Redis commands.
+
+

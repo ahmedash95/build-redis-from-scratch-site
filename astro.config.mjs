@@ -9,6 +9,7 @@ export default defineConfig({
 		preact(),
 		// Enable React for the Algolia search component.
 		react(),
+
 	],
 	site: `https://astro.build`,
 });
