@@ -2,12 +2,11 @@
 title: "كتابة اوامر Redis"
 description: ""
 ---
+import Alert from '../../../components/Alerts/Alert.astro';
 
-بسم الله الرحمن الرحيم
+احنا كتبنا الـ Serializer و عرفنا ازاي هنقدر نرد علي الـ Client بعد كدا لما يبعتلنا اي commands.
 
-في الجزء الثالث احنا كتبنا الـ Serializer و عرفنا ازاي هنقدر نرد علي الـ Client بعد كدا لما يبعتلنا اي commands.
-
-الجزء ده هنبني الـ CommandsHandler و نبدا ندمع شويه commands من Redis.
+الجزء ده هنبني الـ CommandsHandler و نبدا نكتب شويه commands من Redis.
 
 
 ## الـ CommandsHandler
@@ -33,7 +32,7 @@ func ping(args []Value) Value {
 ```
 
 
-و هنزود ف الhandler map اللي عملناها من شويه الـ PING command ده
+و هنزود ف الhandler map اللي عملناها الـ PING command ده
 
 
 ```go
@@ -43,9 +42,11 @@ var Handlers = map[string]func([]Value) Value{
 ```
 
 
-لاحظ اننا كتبنا اسم الـ command capital لان الاوامر دي في redis بتبقي case insensitive.
+<Alert type="info">
+لاحظ اننا كتبنا الاسم capital لان الاوامر دي في redis بتبقي [case insensitive](https://redis.io/commands/command/#:~:text=Redis%20command%20names%20are%20case%2Dinsensitive.).
+</Alert>
 
-و علشان نجرب  PING command هنبدا نغير في الـ main.go انه يبعت الـ Value object لل handler
+و علشان نجرب  `PING` command هنبدا نغير في الـ main.go انه يبعت الـ Value object لل handler
 
 
 ```go
@@ -135,9 +136,9 @@ func ping(args []Value) Value {
 
 الخطوات اللي جايه هتبقي كلها سهله و معتمده علي معرفتك بـ Go والـ Datastructures. لان الجزء الصعب احنا خلصناه لما عملنا الـ RESP والـ Handler
 
-الـ Sets في redis عباره عن key value. في اي وقت هتعمل SET لـ key بـ value معينه. و ف اي وقت تقدر تجيبها تاني بالـ GET command.
+الـ [Set](https://redis.io/commands/set/) في redis عباره عن key value. في اي وقت هتعمل SET لـ key بـ value معينه. و ف اي وقت تقدر تجيبها تاني بالـ GET command.
 
-ف الـ Datastructure اللي هنستخدمها هي map[string]string
+ف الـ Datastructure اللي هنستخدمها هي [Hash Map](https://yourbasic.org/golang/maps-explained/) او `map[string]string`
 
 ف هنروح فالـ handler.go و هنعرف الـ SET command
 
@@ -163,9 +164,11 @@ func set(args []Value) Value {
 ```
 
 
-بنستخدم الـ sync.RWMutex لان المفروض ان الـ Server بتاعنا هيستقبل الـ requests بشكل concurrent. و بنستخدم الـ RWMutex علشان نتاكد ان الـ SETs map مش هتتعدل من اكثر من thread في نفس الوقت.
+<Alert type="info">
+بنستخدم الـ [sync.RWMutex](https://pkg.go.dev/sync#RWMutex) لان المفروض ان الـ Server بتاعنا هيستقبل الـ requests بشكل concurrent. و بنستخدم الـ RWMutex علشان نتاكد ان الـ SETs map مش هتتعدل من اكثر من thread في نفس الوقت.
+</Alert>
 
-اتوقع انك متخيل الـ Get command هيبقي عامل ازاي. بس بكل بساطه لو لقينا الـ Key هنرجعه .. ولو مش موجود هنرجع nil
+اتوقع انك متخيل الـ GET command هيبقي عامل ازاي. بس بكل بساطه لو لقينا الـ Key هنرجعه .. ولو مش موجود هنرجع nil
 
 
 ```go
@@ -204,7 +207,7 @@ var Handlers = map[string]func([]Value) Value{
 
 ## الـ HSET & HGET commands
 
-بكل بساطة دي عبارة عن Hash table. وهي عبارة عن map[string]map[string]string. بتاخد اسم الـ hash و بعدين الـ key و الـ value. علشان مثلا تخزن بيانات زي
+بكل بساطة دي عبارة عن Hash Map جواها Hash Map. وهي عبارة عن `map[string]map[string]string`. بتاخد اسم الـ hash و بعدين الـ key و الـ value. علشان تخزن بيانات زي
 
 
 ```go
@@ -244,7 +247,7 @@ HGET users u1
 ```
 
 
-الكود هيبقي قريب جدا من الـ SET & GET commands. الفرق بينهم ان الـ HSETs هيكون map[string]map[string]string
+الكود هيبقي قريب جدا من الـ SET & GET commands. الفرق بينهم ان الـ HSETs هيكون `map[string]map[string]string`
 
 
 ```go
@@ -297,7 +300,7 @@ func hget(args []Value) Value {
 ```
 
 
-كدا احنا عملنا الـ HSET & HGET commands. فيه كوماند زياده المره دي عن الـSETS اسمه HGETALL. وده بيرجع كل الـ keys و الـ values في الـ hash
+كدا احنا عملنا الـ HSET & HGET commands. فيه كوماند زياده المره دي عن الـSETS اسمه [HGETALL](https://redis.io/commands/hgetall/). وده بيرجع كل الـ keys و الـ values في الـ hash
 
 
 ```bash

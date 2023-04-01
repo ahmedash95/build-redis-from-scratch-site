@@ -2,15 +2,10 @@
 title: "كتابه السيرفر"
 description: ""
 ---
+import Alert from '../../../components/Alerts/Alert.astro';
 
 
-
-### الجزء الاول: بناء المشروع
-
-بافتراض انك تعرف Golang و كتبت بيها قبل كدا. كل اللي هنحتاج نعمله في الـ main اننا هنعمل server و نستخدم نفس Redis port اللي هو 6379. وهنبدا نستقبل connections و نرد ب message واحده بتقول Ok
-
-
-الوا محتاجين نبدا TCP listener علشان اي client يقدر يكلمه
+اول خطوه هي اننا محتاجين نبدا TCP listener علشان اي [Client](first-steps#%D8%AA%D8%AC%D9%87%D9%8A%D8%B2-%D8%A7%D9%84%D9%80-client) يقدر يكلمه
 
 
 ```go
@@ -36,7 +31,7 @@ defer conn.Close() // close connection once finished
 ```
 
 
-بعدها هنعمل inifine loop و نستقبل commands من ال clients و قندر نرد عليهم
+بعدها هنعمل inifine loop و نستقبل commands من ال clients و نقدر نرد عليهم
 
 
 ```go
@@ -117,11 +112,16 @@ func main() {
 
 لو جربنا نشغل الـserver و نكلمه بـ redis-cli هنقدر نشوف الـResponse اللي متوقعينه
 
+<Alert type="info">
+لاحظ هنا ان الـ port نفس رقم Redis
+</Alert>
+
 ![CLI OUTPUT](/images/build-redis-from-scratch/part-1/cli-output.png)
+
 
 ## الخاتمه
 
 كدا احنا خلصنا اول جزء و اللي فيه عملنا server يقدر اي redis client يكلمه و يستقبل منه responses.
 
-حاليا هو ريسبونس واحد Ok. ولكن في المقالات الجايه هنبدا نغير ده علشان نرد علي اوامر زي set, get, hset, hset.
+حاليا هو ريسبونس واحد Ok. ولكن في الاجزاء الجايه هنبدا نغير ده علشان نرد علي اوامر زي set, get, hset, hset.
 

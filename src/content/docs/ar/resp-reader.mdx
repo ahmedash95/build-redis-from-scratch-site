@@ -2,16 +2,13 @@
 title: "قراءة الـ RESP"
 description: ""
 ---
-
-بسم الله الرحمن الرحيم
-بسم الله الرحمن الرحيم
-
-في الجزء الثاني من السلسله هنبدا نشتغل علي الـ RESP (Redis Serialization Protocol) ونبدا نستقبل الاوامر و نقدر نرد عليها.
-
-احنا شرحنا ف الجزء الاول ازاي RESP بيعمل serialize لمختلف البيانات. ف اللي هنركز عليه واحنا بنكتب الRESP انه يقدر يعمل deserialize  و serialize بشكل صحيح.
+import Alert from '../../../components/Alerts/Alert.astro';
 
 
-# ازاي نتعامل مع الـ IO
+اتكلمنا في [الخطوات الاولي](first-steps#ازاي-redis-بيشتغل) ازاي الـServer هيستقبل الاوامر من الـ client وشكل ال request هيبقي عامل ازاي.
+ف هنشرح دلوقتي ازاي نقرا الـ RESP و نعمله parse
+
+## ازاي نتعامل مع الـ IO
 
 علشان نعرف نكتب الـ Parser محتاجين نفهم ايه هو شكل الinput اللي هنستقبله علشان نعمله parse. في GoLang في كذا مكتبه بتساعدنا نتعامل مع الـ IO بس احنا هنستخدم منهم [Bufio](https://golang.org/pkg/bufio/) و هنختارها علشان فيها methods هتساعدنا نتعامل مع البيانات بشكل اسرع زي ReadLine, ReadByte.
 
@@ -25,8 +22,11 @@ $5\r\nAhmed\r\n
 
 ف احنا اللي هنحتاجه اننا نقرا اول byte اللي هي $ علشان نعرف ايه نوع الdata اللي هنبدا نقرها. و بعدين هنقرا الرقم علشان نعرف عدد الbytes اللي محتاجين نقراها اللي هو 5 بالاضافه الي 2 bytes كمان اللي هي \r\n.
 
+<Alert type="info">
+الـ `\r\n` ليها مسمي [CRLF](https://developer.mozilla.org/en-US/docs/Glossary/CRLF) و دي بتعبر عن ان السطر انتهي و المفروض نقف لغايه هنا
+</Alert>
 
-### تعالي نشوف ازاي نعمل كدا
+## تعالي نشوف ازاي نعمل كدا
 
 - هنعمل string و نحوله ل bufio buffer
 
@@ -146,7 +146,7 @@ func main() {
 
 
 
-# كتابة الـ RESP
+## كتابة الـ RESP
 
 هنعمل ملف جديد resp.go علشان يبقي فيه كل الكود اللي بيخص ال serialize and deserialize علي الـ buffer
 
@@ -189,6 +189,8 @@ type Value struct {
 
 دلوقتي احنا عندنا Value struct هيسهل علينا نعمل parsing/deserialize للـ RESP commands. ف هنعمل دلوقتي Reader علشان يبقي فيه كل الميثودز اللي هتساعدنا نقرا من ال buffer و نخزنها في الـ Value struct
 
+
+### الـ Reader
 
 ```go
 type Resp struct {
@@ -252,11 +254,11 @@ func (r *Resp) readInteger() (x int, n int, err error) {
 
 
 
-# عمليه الـ Parsing او الـ Deserialize
+### عمليه الـ Parsing او الـ Deserialize
 
 عملنا الـ structs والـ methods اللي هتسهل علينا نقرا من الـ buffer. ف هنبدا دلوقتي نعمل الميثود اللي هتبدا تقرا من ال
 buffer بشكل recursive. و ال recursive هنا علشان الـ RESP command بيبقي nested types ف محتاجين في كل خطوه من ال input اللي جاي
-اننا نعمل Read للـ Value اللي جاي
+اننا نعمل Read للـ Value من جديد
 
 
 ```go
@@ -350,7 +352,9 @@ func (r *Resp) readArray() (Value, error) {
 
 
 ```bash
-# $5\r\nhello\r\n
+$5\r\nhello\r\n
+```
+```bash
 $5
 hello
 ```
@@ -526,7 +530,7 @@ func (r *Resp) readBulk() (Value, error) {
 
 
 
-# الخاتمه
+## الخاتمه
 
 وبكدا نبقي عملنا Deserialize للـ RESP بالـ Reader و نقدر نغير في الـ main.go علشان نقرا الـ Commands
 
@@ -585,7 +589,7 @@ func main() {
 
 بس لو شفت السطر الثالث .. هتلاقي الـ print Value فيها نفس عدد ال strings اللي بعتناها من redis-cli ع اليمين
 
-الجزء اللي جاي  هنبدا نرد علي PING command و نعمل serialize للـ Value response علي الـ Writer و نرد بيه علي الـ Client
+الجزء اللي جاي هنعمل serialize للـ Value response علي الـ Writer و نرد بيه علي الـ Client
 واللي منها بعد كدا هنقدر نعمل implement لاي Redis commands.
 
 

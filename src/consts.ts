@@ -50,7 +50,8 @@ export const SIDEBAR: Sidebar = {
 			{ text: 'الكتابة الي RESP', link: 'ar/resp-writer' },
 			{ text: 'كتابة الاوامر', link: 'ar/implementing-commands' },
 			{ text: 'تخزين البيانات', link: 'ar/aof' },
+			{ text: 'الملخص', link: 'ar/next' },
 		],
-		// 'Another Section': [{ text: 'Page 4', link: 'en/page-4' }],
+		'': [{ text: 'عن الكاتب', link: 'ar/author' }],
 	},
 };

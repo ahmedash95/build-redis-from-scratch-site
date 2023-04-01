@@ -3,11 +3,7 @@ title: "كتابة الـ RESP"
 description: ""
 ---
 
-
-
-بسم الله الرحمن الرحيم
-
-في الجزء الثاني احنا كتبنا اول جزء من الـ RESP وهو ال Parsing والمسؤول عن تحويل الـ RESP الى الـ Value Object نقدر
+في المقالة اللي فاتت احنا كتبنا اول جزء من الـ RESP وهو ال Parsing والمسؤول عن تحويل الـ RESP الى الـ Value Object نقدر
 نعرف منه الـ Client بعت اي commands.  في الجزء ده هنشوف ازاي ممكن نرد على الـ Client بـ RESP ونكتب الـ Writer.
 
 
@@ -15,6 +11,8 @@ description: ""
 نسجل فيه الرد اللي احنا هنرد بيه علي الـclient سواء String, Bulk or Array.
 
 ف اول خطوة محتاجين نعملها اننا نكتب الـ Marshal اللي هيحول الـ Value لـ bytes عباره عن RESP response.
+
+## كتابة الـ Value Serializer
 
 - هنكتب الاول ميثود Marshal و اللي منها هنكلم الميثود الخاصه بكل type حسب نوع الـ Value
 
@@ -39,7 +37,9 @@ func (v Value) Marshal() []byte {
 
 كالعاده، هنشوف الtyp نوعها ايه و منها هنكلم الميثود اللي بتتعامل مع النوع ده
 
-- اول type هتكون الـ Simple String لانها سهله
+### Simple Strings
+
+اول type هتكون الـ Simple String لانها سهله
 ```go
 func (v Value) marshalString() []byte {
 	var bytes []byte
@@ -54,8 +54,7 @@ func (v Value) marshalString() []byte {
 بكل بساطه بنعمل byte array و بنضيف الـ String ثم الـ [CRLF](https://developer.mozilla.org/en-US/docs/Glossary/CRLF).
 وخلي بالك من غير الـ CRLF هيحصل مشكله لان RESP client مش هيفهم الريسبونس من غيره.
 
-- الـنوع التاني هنعمل Bulk Strings
-
+### الـ Bulk String
 ```go
 func (v Value) marshalBulk() []byte {
 	var bytes []byte
@@ -69,7 +68,7 @@ func (v Value) marshalBulk() []byte {
 }
 ```
 
-- الـ Array
+### الـ Array
 
 ```go
 func (v Value) marshalArray() []byte {
@@ -90,7 +89,9 @@ func (v Value) marshalArray() []byte {
 لاحظ ان فيه حاله الـ Array احنا جوا ال loop بنكلم Marshal method علي ال Value Object علشان نحوله ايا كان نوعه ايه. وهو ده
 المقصود بالـ Recursion اللي ذكرناه في الجزء الاول واحنا بنعمل Parse.
 
-- واخيرا محتاجين الـ Null و الـ Error علشان لو هنرد علي الـ Client بان البيانات مش موجوده او فيه error.
+
+### الـ Null و الـ Error
+واخيرا محتاجين الـ Null و الـ Error علشان لو هنرد علي الـ Client بان البيانات مش موجوده او فيه error.
 
 ```go
 func (v Value) marshallError() []byte {
@@ -107,6 +108,7 @@ func (v Value) marshallNull() []byte {
 }
 ```
 
+## الـ Resp.go
 وبكدا يبقي ملف الـ resp.go ده الجزء الزياده بالكامل اللي كتبناه
 
 ```go
@@ -174,35 +176,15 @@ func (v Value) marshallError() []byte {
 func (v Value) marshallNull() []byte {
 	return []byte("$-1\r\n")
 }
-
-// Writer
-
-type Writer struct {
-	writer io.Writer
-}
-
-func NewWriter(w io.Writer) *Writer {
-	return &Writer{writer: w}
-}
-
-func (w *Writer) Write(v Value) error {
-	var bytes = v.Marshal()
-
-	_, err := w.writer.Write(bytes)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
 ```
 
-<br>
 كدا احنا خلصنا 90%  من الـ Writer و مش فاضل بس غير اننا نرد بيه علي الـ Client من الـ IO. ولكن خلينا الاول ناخد امثله
 علي الكود بتاعنا ده و نشوف هيشتغل ازاي و نشوف الـ Output.
 
+## امثله علي الـ Marshal
 
-- لو هنرد مثلا بـ String Ok
+### Simple String
+لو هنرد مثلا بـ String Ok
 
 ```go
 v := Value{typ: "string", str: "Ok"}
@@ -215,7 +197,8 @@ fmt.Println(string(v.Marshal()))
 +Ok\r\n
 ```
 
-- لو هنرد بـ Bulk String
+### Bulk String
+لو هنرد بـ Bulk String
 
 ```go
 v := Value{typ: "bulk", bulk: "Hello World"}
@@ -228,7 +211,8 @@ fmt.Println(string(v.Marshal()))
 $11\r\nHello World\r\n
 ```
 
-- لو هنرد بـ Array
+### Array
+لو هنرد بـ Array
 
 ```go
 v := Value{typ: "array", array: []Value{
@@ -244,9 +228,10 @@ fmt.Println(string(v.Marshal()))
 *2\r\n$5\r\nHello\r\n$5\r\nWorld\r\n
 ```
 
-<br>
 
 وبكدا يبقي احنا جاهزين بس نكتب الـ bytes اللي بناخدها من الـ Marshal method للـ Writer.
+
+## كتابة الـ Writer
 
  و علشان نعمل writer
 ف الموضوع بسيط خالص .. كل اللي محتاجينه Writer struct و بياخد io.Writer
@@ -283,7 +268,7 @@ writer := NewWriter(conn)
 writer.Write(Value{typ: "string", str: "OK"})
 ```
 
-# الخاتمه
+## الخاتمه
 
 كدا احنا خلصنا الـ RESP serialize and deserialize و عملنا الReader والـ Writer اللي هيساعدونا بكل سهوله نرد علي الـ Client
 

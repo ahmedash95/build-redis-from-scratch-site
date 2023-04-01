@@ -8,13 +8,12 @@ import Alert from '../../../components/Alerts/Alert.astro';
 
 في سلسلة المقالات دي، هنشرح خطوة بخطوة بشكل مبسط ازاي نقدر نكتب In Memory Database زي Redis. و الهدف منها هو محاوله تبسيط و شرح الـ Low Level Details اللي بتتعامل معها في الـ Databases و الـ DataStructures و الـ Algorithms. و اختيار Redis هو بسبب بساطتها نفسها كاداه و سهوله فهمها.
 
-![Intro](/images/intro.png)
-
 ### احنا هنبني ايه؟
 سلسلة المقالات دي هدفها من الاول للاخر انك تبني InMemory Database زي Redis. و المقصود بانها زي Redis انها هتبقي فيها شويه اوامر من اللي موجودين في Redis و الجزء المهم هو ازاي تخزن البيانات دي علي الـDisk و تقرها تاني علي الـMemory لما تشغل الـServer.
 
 و اللغه اللي هنستخدمها هي Go نظرا لسهولة الكود بتاعها و ان فيه قواعد بيانات كتير اتكتب بيها بالفعل زي [boltdb](https://github.com/boltdb/bolt) و [diskv](https://github.com/peterbourgon/diskv)
 
+![Intro](/images/diagram.svg)
 
 اللي هنعمله اننا:
 
@@ -23,7 +22,9 @@ import Alert from '../../../components/Alerts/Alert.astro';
 - هنسخدم go routines علشان نقدر نستقبل اكتر من connection في نفس الوقت
 - و هنكتب البيانات علي الـDisk عن طريق الـ [Append Only File (AOF)](https://redis.io/docs/management/persistence/) ودي طريقه Redis بيستخدمها من ضمن عده طرق تانيه عنده. بالتالي السيرفر لو حصله crash او restart نقدر نرجع البيانات تاني
 
-<Alert message="لو فيه مصطلحات مش فاهمها دلوقتي متشغلش بالك بيها و هتفهما بعدين واحنا بنتكلم علي كل جزء" type="info"></Alert>
+<Alert type="info">
+لو فيه مصطلحات مش فاهمها دلوقتي متشغلش بالك بيها و هتفهما بعدين واحنا بنتكلم علي كل جزء
+</Alert>
 
 
 و الكود بتاعنا ف الاخر هيبقي عباره عن 4 ملفات سهل تقراها و تفهمها اي وقت
@@ -52,4 +53,6 @@ import Alert from '../../../components/Alerts/Alert.astro';
 - ✅ بعرف اقرا كود Go و افهمه حتي لو بشكل بسيط
 - ✅ اتعاملت مع Redis قبل كدا و عندي خلفيه عن الـ Commands بتاعتها
 
-<Alert message="حتي لو متعرفش Go و Redis. تقدر بردو تقرا المقالات و اكيد هتلاقي حاجات مفيده" type="warning"></Alert>
+<Alert type="warning">
+حتي لو متعرفش Go و Redis. تقدر بردو تقرا المقالات و اكيد هتلاقي حاجات مفيده
+</Alert>

@@ -430,6 +430,14 @@ h2.heading {
 	margin: 0.5rem 0.5rem;
 }
 
+.alert span p {
+	color: #000000!important;
+}
+
+.alert span p code {
+	color: var(--theme-text)
+}
+
 .alert.warning {
 	background-color: #f8ebd7;
 	border-color: #f5edc6;
