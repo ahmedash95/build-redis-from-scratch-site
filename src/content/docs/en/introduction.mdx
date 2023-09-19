@@ -1,0 +1,53 @@
+---
+title: ""
+description: "How to Build an In-Memory Database like Redis from Scratch with Go"
+---
+import Alert from '../../../components/Alerts/Alert.astro';
+
+In the following series of articles, we will explain step by step how to build an in-memory database like Redis. The goal is to simplify and explain the low-level details involved in databases, data structures, and algorithms. We chose Redis because of its simplicity as a tool and its ease of understanding.
+
+### What are we going to build?
+The purpose of this series is to guide you in building an in-memory database like Redis. By "like Redis," we mean that it will have some of the commands found in Redis. The important part is how we store this data on disk and read it back into memory when the server is running.
+
+We will be using the Go language due to its simple code and the fact that there are already many databases written in Go, such as [boltdb](https://github.com/boltdb/bolt) and [diskv](https://github.com/peterbourgon/diskv).
+
+![Intro](/images/diagram.svg)
+
+What we will do is:
+
+- Build a Redis clone that allows you to use [strings](https://redis.io/docs/data-types/strings/) and [hashes](https://redis.io/docs/data-types/hashes/).
+- Write a parser to understand [RESP](https://redis.io/docs/reference/protocol-spec/), which allows the server to receive commands and respond with responses.
+- Use go routines to handle multiple connections simultaneously.
+- Write data to disk using the [Append Only File (AOF)](https://redis.io/docs/management/persistence/), which is one of the methods Redis uses for persistence. This way, if the server crashes or restarts, we can restore the data.
+
+<Alert type="info">
+If there are any terms you don't understand right now, don't worry about them. We will explain them later as we go through each part.
+</Alert>
+
+In the end, our code will consist of four easy-to-read and understand files:
+```bash
+.
+├── aof.go
+├── handler.go
+├── main.go
+└── resp.go
+```
+
+### Why should you read these articles?
+
+If you are a software developer, you are certainly dealing with databases in your daily work. Databases themselves can be complex, with many concepts to make it easier for you as an end user to store and manipulate your data, whether you are performing complex or simple operations. Most articles and courses that explain databases focus on the high-level details and how to use them. However, there are few articles that explain how they work internally. For example, how are indexes created and stored? How does the database decide which index to use based on the query?
+
+After researching and reading various books, such as [Database Internal](https://www.databass.dev/), and articles like [Let's build a simple database (sqlite clone)](https://cstack.github.io/db_tutorial/), I decided to start building my own database and try to apply the concepts that I am interested in, following the principle of "What I cannot create, I do not understand" - Richard Feynman.
+
+I wanted to share this experience in Arabic due to the lack of available content on this topic. What we will build in these articles will serve as a suitable foundation for writing more articles about complex databases like SQLite, MySQL, PostgreSQL, and MongoDB.
+
+### Are these articles suitable for me, and will I be able to understand them?
+
+While writing these articles, I tried to keep the language simple and straightforward. The code is divided into parts so that you can understand what each part does and how its code looks before we put all the code together and run it as one thing. However, the reader will need to have some background knowledge about the following:
+
+- ✅ Familiarity with reading and understanding Go code, even if it's at a basic level.
+- ✅ Previous experience with Redis and knowledge of its commands.
+
+<Alert type="warning">
+Even if you don't know Go or Redis, you can still read the articles and find useful information.
+</Alert>
