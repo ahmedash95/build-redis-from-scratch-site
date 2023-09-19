@@ -9,24 +9,36 @@ import LeftSidebar from '../components/LeftSidebar/LeftSidebar.astro';
 import RightSidebar from '../components/RightSidebar/RightSidebar.astro';
 import Footer from '../components/Footer/Footer.astro';
 import { GITHUB_EDIT_URL, SITE } from '../consts';
+import { getLanguageFromURL, useTranslation } from '../languages';
+
 
 type Props = CollectionEntry<'docs'>['data'] & {
 	headings: MarkdownHeading[];
 };
+
+function determineDirection(lang) {
+  switch(lang) {
+    case 'ar':
+      return 'rtl';
+    default:
+      return 'ltr';
+  }
+}
 
 const { headings, ...data } = Astro.props;
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const currentPage = Astro.url.pathname;
 const currentFile = `src/content/docs${currentPage.replace(/\/$/, '')}.md`;
 const githubEditUrl = `${GITHUB_EDIT_URL}/${currentFile}`;
+const lang = getLanguageFromURL(currentPage);
 ---
 
-<html dir={data.dir} lang={data.lang} class="initial">
+<html dir={determineDirection(lang)} lang={lang} class="initial">
 	<head>
 		<HeadCommon />
 		<HeadSEO {...data} canonicalUrl={canonicalURL} />
 		<title>
-			{`${data.title} 🚀 ${SITE.title}`}
+			{`${data.title} ${useTranslation(lang)['title']}`}
 		</title>
 		<style>
 			body {
@@ -117,7 +129,7 @@ const githubEditUrl = `${GITHUB_EDIT_URL}/${currentFile}`;
 				top: 2rem;
 			}
 		</style>
-		<script defer data-domain="build-redis-from-scratch.dev" src="https://plausible.io/js/script.js"></script>
+		<script src="https://cdn.usefathom.com/script.js" data-site="XAKSCDTN" defer></script>
 	</head>
 
 	<body>
