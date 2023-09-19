@@ -423,7 +423,7 @@ h2.heading {
 .alert {
 	display: flex;
 	align-items: center;
-	justify-content: right;
+	/* justify-content: right; */
 }
 
 .alert span {

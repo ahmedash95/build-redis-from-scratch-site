@@ -2,6 +2,7 @@ import type { MarkdownHeading } from 'astro';
 import type { FunctionalComponent } from 'preact';
 import { unescape } from 'html-escaper';
 import { useState, useEffect, useRef } from 'preact/hooks';
+import { useTranslation } from '../../languages';
 
 type ItemOffsets = {
 	id: string;
@@ -66,10 +67,15 @@ const TableOfContents: FunctionalComponent<{ headings: MarkdownHeading[] }> = ({
 		setCurrentID(e.target.getAttribute('href').replace('#', ''));
 	};
 
+	const [onthispage, setOnThisPage] = useState(0)
+	useEffect(() => {
+		setOnThisPage(useTranslation(document.documentElement.lang)['onthispage'])
+	})
+
 	return (
 		<>
 			<h2 id={onThisPageID} className="heading">
-				{headings.length > 0 ? 'في هذه الصفحة' : ''}
+				{headings.length > 0 ? onthispage : ''}
 			</h2>
 			<ul ref={toc}>
 				{headings

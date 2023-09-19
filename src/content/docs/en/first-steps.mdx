@@ -1,0 +1,106 @@
+---
+title: "First Steps"
+description: ""
+---
+
+### Writing Main.go
+
+During the project, we won't be using any external libraries because everything we need is available in Go itself. So all you need to do is start a new Go project and prepare the Main.go file.
+
+```go
+package main
+
+import (
+    "fmt"
+)
+
+func main() {
+    fmt.Println("Hello World")
+}
+```
+
+### Setting Up the Client
+
+The InMemory Database we are going to write will always be referred to as the "Server" because it is a Database Server, similar to MySQL or Redis Server.
+
+And since the Server always needs a "Client" to communicate with, we will also need a client to test the code we write and see how it works. The easiest thing to try is a Redis Client because it is easy to use and also because the Server we are going to write will be compatible with Redis.
+
+By compatible, we mean that any client that can communicate with Redis will be able to communicate with our server.
+
+You can install Redis and its client from the official [Redis website here](https://redis.io/docs/getting-started/installation/).
+
+After that, immediately try running the following command:
+
+```bash
+$ redis-cli ping
+
+PONG
+```
+
+The last step you need to do after that is to shut down the Redis Server because our code and our server will be using the same port.
+
+- If you are on macOS:
+```
+$ brew services stop redis
+```
+
+- If you are on Linux:
+```bash
+$ sudo systemctl stop redis
+```
+
+### How Redis Works
+
+Let's first explain how Redis works with some examples. For example, you can store key-value pairs using Strings.
+
+The key will be a string, and the value can be a serialized object of any type, such as an array, integer, or boolean.
+
+```bash
+SET admin ahmed
+```
+
+```bash
+> GET admin
+
+"ahmed"
+```
+
+Redis receives these commands through a Serialization Protocol called [RESP (Redis serialization protocol)](https://redis.io/docs/reference/protocol-spec/).
+
+So if we look at how `SET admin ahmed` is sent as a serialized message to Redis, it will look like this:
+
+```bash
+*3\r\n$3\r\nset\r\n$5\r\nadmin\r\n$5\r\nahmed
+```
+
+And to simplify it even more:
+
+```bash
+*3
+$3
+set
+$5
+admin
+$5
+ahmed
+```
+
+If we look at the RESP, it tells us the meaning of each symbol:
+
+- '*' indicates that we have an array with a size of 3. Therefore, we will read 6 lines. Each pair of lines represents the type and size of the object, and the second line contains the value of that object.
+- '$' indicates that it is a string with a length of 5. So the next line will contain exactly 5 characters.
+
+Similarly, when we say `GET admin`, it returns the same object structure with different values:
+
+```bash
+$5\r\nahmed\r\n
+```
+
+```bash
+$5
+ahmed
+```
+
+What we are going to do is build the same serializer, and through it, we will be able to communicate with our server using any Redis client by sending commands exactly like Redis.
+
+And with that, we are ready to start building our database.

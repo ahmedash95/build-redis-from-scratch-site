@@ -1,0 +1,281 @@
+---
+title: "Writing Data to Disk"
+description: ""
+---
+import Alert from '../../../components/Alerts/Alert.astro';
+
+
+In the previous sections, we implemented an InMemory Database and made it Redis compatible using the RESP protocol.
+
+In this section, we will apply data persistence to our database. Data persistence is an important feature for any database, even if it is InMemory, because there are many cases where you may want to perform different operations on the data. However, the tool can also provide durability by storing the data on disk, so that you don't lose the data in case of a crash or server restart.
+
+The concept of persistence is broad and varies depending on how you store and handle the data. For example, SQL databases like SQLite and MySQL do not allow any records to be lost in any way. The code for this part is very complex to ensure this.
+
+The same applies to Redis. There are different ways to persist data depending on your needs:
+
+- RDB (Redis Database): This is a snapshot of the data that is created at regular intervals according to the configuration. For example, every 3 minutes or every 10 minutes, depending on how you configure it. In this method, Redis takes a complete copy of the data in memory and saves it to a file. When a restart or crash occurs, the data is reloaded from the RDB file.
+
+- AOF (Append only file): In this method, Redis records each command in the file as RESP. When a restart occurs, Redis reads all the RESP commands from the AOF file and executes them in memory.
+
+## AOF
+
+The approach we will use is simple because we can link it to the RESP struct we created. Every time we execute a command, we will record its RESP representation in the file. When the server/code starts, it will read from the AOF file and send these commands to the reader, which will execute them in memory.
+
+Before we start, let me explain the format of the AOF file:
+
+If we executed 2 commands:
+
+```go
+> set name ahmed
+> set website ahmedash95.github.io
+```
+
+The content of the file will be:
+
+```go
+*2
+$3
+set
+$4
+name
+*3
+$3
+set
+$4
+name
+$5
+ahmed
+*3
+$3
+set
+$7
+website
+$20
+ahmedash95.github.io
+```
+
+I believe it is now easy for you to read and understand the RESP protocol because we have already applied it in the previous sections.
+
+## Writing the AOF struct
+
+The first step is to create a file called `aof.go` that will contain all the code related to the AOF.
+
+- First, we create the `Aof` struct, which will hold the file that will be stored on disk and a `bufio.Reader` to read the RESP commands from the file.
+
+```go
+type Aof struct {
+	file *os.File
+	rd   *bufio.Reader
+	mu   sync.Mutex
+}
+```
+
+Then, we create the `NewAof` method to be used in `main.go` when the server starts.
+
+```go
+func NewAof(path string) (*Aof, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		return nil, err
+	}
+
+	aof := &Aof{
+		file: f,
+		rd:   bufio.NewReader(f),
+	}
+
+	// Start a goroutine to sync AOF to disk every 1 second
+	go func() {
+		for {
+			aof.mu.Lock()
+
+			aof.file.Sync()
+
+			aof.mu.Unlock()
+
+			time.Sleep(time.Second)
+		}
+	}()
+
+	return aof, nil
+}
+```
+
+- What happens here is that we first create the file if it doesn't exist or open it if it does.
+- Then, we create the `bufio.Reader` to read from the file.
+- We start a goroutine to sync the AOF file to disk every 1 second while the server is running.
+
+<Alert type="info">
+The idea of syncing every second ensures that the changes we made are always present on disk. Without the sync, it would be up to the OS to decide when to flush the file to disk. With this approach, we ensure that the data is always available even in case of a crash. If we lose any data, it would only be within the second of the crash, which is an acceptable rate.
+
+If you want 100% durability, we won't need the goroutine. Instead, we would sync the file every time a command is executed. However, this would result in poor performance for write operations because IO operations are expensive.
+</Alert>
+
+The next method is `Close`, which ensures that the file is properly closed when the server shuts down.
+
+```go
+func (aof *Aof) Close() error {
+	aof.mu.Lock()
+	defer aof.mu.Unlock()
+
+	return aof.file.Close()
+}
+```
+
+After that, we create the `Write` method, which will be used to write the command to the AOF file whenever we receive a request from the client.
+
+```go
+func (aof *Aof) Write(value Value) error {
+	aof.mu.Lock()
+	defer aof.mu.Unlock()
+
+	_, err := aof.file.Write(value.Marshal())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+```
+
+Note that we use `v.Marshal()` to write the command to the file in the same RESP format that we receive. This way, when we read the file later, we can parse these RESP lines and write them back to memory.
+
+## Writing the AOF
+
+All we need to do now is use `NewAof` in `main.go` and write to the AOF file with every request from the client.
+
+```go
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	aof, err := NewAof("database.aof")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer aof.Close()
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		resp := NewResp(conn)
+		value, err := resp.Read()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		if value.typ != "array" {
+			fmt.Println("Invalid request, expected array")
+			continue
+		}
+
+		if len(value.array) == 0 {
+			fmt.Println("Invalid request, expected array length > 0")
+			continue
+		}
+
+		command := strings.ToUpper(value.array[0].bulk)
+		args := value.array[1:]
+
+		writer := NewWriter(conn)
+
+		handler, ok := Handlers[command]
+		if !ok {
+			fmt.Println("Invalid command: ", command)
+			writer.Write(Value{typ: "string", str: ""})
+			continue
+		}
+
+		if command == "SET" || command == "HSET" {
+			aof.Write(value)
+		}
+
+		result := handler(args)
+		writer.Write(result)
+	}
+}
+```
+
+<Alert type="info">
+Note that we only write the `SET` commands because other commands like `GET`, `HGET`, and `HGETALL` do not need to be stored and won't make a difference except for increasing the size of the AOF file.
+</Alert>
+
+If we run the server and execute a command like:
+
+```bash
+set name ahmed
+```
+
+We will find that the `database.aof` file contains the following content:
+
+```bash
+*3
+$3
+set
+$4
+name
+$5
+ahmed
+```
+
+That's it for the writing part. Now, we need to read the commands from the AOF file.
+
+## Reading the AOF
+
+Initially, we created the `Read` method, and all we need to do is call it at the beginning of `main.go`.
+
+```go
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	aof, err := NewAof("database.aof")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer aof.Close()
+
+	aof.Read(func(value Value) {
+		command := strings.ToUpper(value.array[0].bulk)
+		args := value.array[1:]
+
+		handler, ok := Handlers[command]
+		if !ok {
+			fmt.Println("Invalid command: ", command)
+			return
+		}
+
+		handler(args)
+	})
+
+	// ...
+}
+```
+
+As you can see, we use the same code we used before to run the commands. However, this time, we don't write to the AOF file because we are reading from it.
+
+## Conclusion
+
+With this, we have completed the AOF implementation and learned how to persist data on disk. It's worth noting that Redis uses the same approach for persistence. You can read [this article](https://www.memurai.com/blog/redis-persistence-deep-dive) to learn more about the differences between RDB and AOF.

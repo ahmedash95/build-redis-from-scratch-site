@@ -1,8 +1,8 @@
 export const SITE = {
 	title: 'بناء Redis من الصفر',
 	description: 'بناء Redis من الصفر باستخدام Go وبدون اي مكتبات خارجية',
-	defaultLanguage: 'ar',
-	dir: 'rtl',
+	defaultLanguage: 'en',
+	dir: 'ltr',
 } as const;
 
 export const OPEN_GRAPH = {
@@ -15,8 +15,8 @@ export const OPEN_GRAPH = {
 };
 
 export const KNOWN_LANGUAGES = {
-	English: 'en',
-	Arabic: 'ar',
+	"English": 'en',
+	"العربية": 'ar',
 } as const;
 
 export const KNOWN_LANGUAGE_CODES = Object.values(KNOWN_LANGUAGES);
@@ -38,7 +38,17 @@ export type Sidebar = Record<
 >;
 export const SIDEBAR: Sidebar = {
 	en: {
-
+		'index' : [
+			{ text: 'Introduction', link: 'en/introduction' },
+			{ text: 'First steps', link: 'en/first-steps' },
+			{ text: 'Building Server', link: 'en/writing-server' },
+			{ text: 'Reading RESP', link: 'en/resp-reader' },
+			{ text: 'Writing RESP', link: 'en/resp-writer' },
+			{ text: 'Redis Commands', link: 'en/implementing-commands' },
+			{ text: 'Data Persistence', link: 'en/aof' },
+			{ text: 'Whats Next', link: 'en/next' },
+		],
+		'': [{ text: 'Author', link: 'en/author' }],
 	},
 	ar: {
 		'الفهرس': [

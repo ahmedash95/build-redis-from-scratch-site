@@ -1,0 +1,124 @@
+---
+title: "Server Setup"
+description: ""
+---
+import Alert from '../../../components/Alerts/Alert.astro';
+
+
+The first step is to start a TCP listener so that any [Client](first-steps#%D8%AA%D8%AC%D9%87%D9%8A%D8%B2-%D8%A7%D9%84%D9%80-client) can communicate with it.
+
+
+```go
+l, err := net.Listen("tcp", ":6379")
+if err != nil {
+    fmt.Println(err)
+    return
+}
+```
+
+
+Then we start receiving requests.
+
+
+```go
+conn, err := l.Accept()
+if err != nil {
+    fmt.Println(err)
+    return
+}
+
+defer conn.Close() // close connection once finished
+```
+
+
+After that, we create an infinite loop and receive commands from clients and respond to them.
+
+
+```go
+for {
+    buf := make([]byte, 1024)
+
+    // read message from client
+    _, err = conn.Read(buf)
+    if err != nil {
+        if err == io.EOF {
+            break
+        }
+        fmt.Println("error reading from client: ", err.Error())
+        os.Exit(1)
+    }
+
+    // ignore request and send back a PONG
+    conn.Write([]byte("+OK\r\n"))
+}
+```
+
+
+Note that in the last line, we respond with "Ok" regardless of the command received from the client.
+
+Therefore, the complete code will be as follows:
+
+
+```go
+package main
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+)
+
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		buf := make([]byte, 1024)
+
+		// read message from client
+		_, err = conn.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			fmt.Println("error reading from client: ", err.Error())
+			os.Exit(1)
+		}
+
+		// ignore request and send back a PONG
+		conn.Write([]byte("+OK\r\n"))
+	}
+}
+```
+
+
+If we try to run the server and communicate with it using redis-cli, we can see the expected response.
+
+<Alert type="info">
+Note that the port number is the same as Redis.
+</Alert>
+
+![CLI OUTPUT](/images/build-redis-from-scratch/part-1/cli-output.png)
+
+
+## Conclusion
+
+That's it for the first part. In this part, we created a server that can be communicated with by any Redis client and receive responses from it.
+
+Currently, the response is just "Ok". However, in the upcoming parts, we will start changing this to respond to commands like set, get, hset, hget.

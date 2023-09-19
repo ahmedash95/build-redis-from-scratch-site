@@ -1,0 +1,266 @@
+---
+title: "Writing RESP"
+description: ""
+---
+
+In the previous article, we wrote the first part of RESP, which is Parsing and is responsible for converting RESP into Value Objects. From this, we can know what commands the client sent. In this part, we will see how we can respond to the client with RESP and write the Writer.
+
+Since we are using Value to convert RESP to Go struct, we can understand what is required. We will also use Value to record the response that we will send to the client, whether it is a String, Bulk, or Array.
+
+The first step we need to do is to write the Marshal, which will convert the Value to bytes representing the RESP response.
+
+## Writing the Value Serializer
+
+- First, we will write the Marshal method, which will call the specific method for each type based on the Value type.
+
+```go
+func (v Value) Marshal() []byte {
+	switch v.typ {
+	case "array":
+		return v.marshalArray()
+	case "bulk":
+		return v.marshalBulk()
+	case "string":
+		return v.marshalString()
+	case "null":
+		return v.marshallNull()
+	case "error":
+		return v.marshallError()
+	default:
+		return []byte{}
+	}
+}
+```
+
+As usual, we check the type and call the method that deals with that type.
+
+### Simple Strings
+
+The first type will be Simple String because it is easy.
+
+```go
+func (v Value) marshalString() []byte {
+	var bytes []byte
+	bytes = append(bytes, STRING)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+```
+
+Simply, we create a byte array and add the String, followed by the CRLF (Carriage Return Line Feed). Note that without the CRLF, there will be a problem because the RESP client will not understand the response without it.
+
+### Bulk String
+
+```go
+func (v Value) marshalBulk() []byte {
+	var bytes []byte
+	bytes = append(bytes, BULK)
+	bytes = append(bytes, strconv.Itoa(len(v.bulk))...)
+	bytes = append(bytes, '\r', '\n')
+	bytes = append(bytes, v.bulk...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+```
+
+### Array
+
+```go
+func (v Value) marshalArray() []byte {
+	len := len(v.array)
+	var bytes []byte
+	bytes = append(bytes, ARRAY)
+	bytes = append(bytes, strconv.Itoa(len)...)
+	bytes = append(bytes, '\r', '\n')
+
+	for i := 0; i < len; i++ {
+		bytes = append(bytes, v.array[i].Marshal()...)
+	}
+
+	return bytes
+}
+```
+
+Note that in the case of Array, we call the Marshal method on the Value Object inside the loop to convert it regardless of its type. This is what we mean by recursion, which we mentioned in the first part when we were doing the Parse.
+
+### Null and Error
+
+Finally, we need Null and Error in case we need to respond to the client that the data is not found or there is an error.
+
+```go
+func (v Value) marshallError() []byte {
+	var bytes []byte
+	bytes = append(bytes, ERROR)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshallNull() []byte {
+	return []byte("$-1\r\n")
+}
+```
+
+## Resp.go
+
+So, the resp.go file is the complete additional part that we wrote.
+
+```go
+// Marshal Value to bytes
+func (v Value) Marshal() []byte {
+	switch v.typ {
+	case "array":
+		return v.marshalArray()
+	case "bulk":
+		return v.marshalBulk()
+	case "string":
+		return v.marshalString()
+	case "null":
+		return v.marshallNull()
+	case "error":
+		return v.marshallError()
+	default:
+		return []byte{}
+	}
+}
+
+func (v Value) marshalString() []byte {
+	var bytes []byte
+	bytes = append(bytes, STRING)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshalBulk() []byte {
+	var bytes []byte
+	bytes = append(bytes, BULK)
+	bytes = append(bytes, strconv.Itoa(len(v.bulk))...)
+	bytes = append(bytes, '\r', '\n')
+	bytes = append(bytes, v.bulk...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshalArray() []byte {
+	len := len(v.array)
+	var bytes []byte
+	bytes = append(bytes, ARRAY)
+	bytes = append(bytes, strconv.Itoa(len)...)
+	bytes = append(bytes, '\r', '\n')
+
+	for i := 0; i < len; i++ {
+		bytes = append(bytes, v.array[i].Marshal()...)
+	}
+
+	return bytes
+}
+
+func (v Value) marshallError() []byte {
+	var bytes []byte
+	bytes = append(bytes, ERROR)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshallNull() []byte {
+	return []byte("$-1\r\n")
+}
+```
+
+So, we have completed 90% of the Writer, and we just need to write the bytes we get from the Marshal method to the Writer. 
+
+## Writing the Writer
+
+To create the writer, it is very simple. All we need is a Writer struct that takes io.Writer.
+
+```go
+type Writer struct {
+	writer io.Writer
+}
+
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{writer: w}
+}
+```
+
+Then, we create a method that takes Value and writes the bytes it gets from the Marshal method to the Writer.
+
+```go
+func (w *Writer) Write(v Value) error {
+	var bytes = v.Marshal()
+
+	_, err := w.writer.Write(bytes)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+```
+
+To use it, for example, to respond with "OK" to Redis commands, all we need is:
+
+```go
+writer := NewWriter(conn)
+writer.Write(Value{typ: "string", str: "OK"})
+```
+
+## Conclusion
+
+So, we have completed the RESP serialize and deserialize, and we have created the Reader and Writer that will help us easily respond to the client.
+
+Finally, we need to change main.go and make it respond through the Writer.
+
+```go
+package main
+
+import (
+	"fmt"
+	"net"
+)
+
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		resp := NewResp(conn)
+		value, err := resp.Read()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		_ = value
+
+		writer := NewWriter(conn)
+		writer.Write(Value{typ: "string", str: "OK"})
+	}
+}
+```
+
+The next part, Insha'Allah, we will start responding to commands like [PING](https://redis.io/commands/ping/), [SET](https://redis.io/commands/set/), [GET](https://redis.io/commands/get/), [HSET](https://redis.io/commands/hset/), [HGET](https://redis.io/commands/hget/), and [HGETALL](https://redis.io/commands/hgetall/) and see how we can implement them in Go.
