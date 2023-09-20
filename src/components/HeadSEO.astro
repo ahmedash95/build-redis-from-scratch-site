@@ -8,7 +8,7 @@ type Props = { canonicalUrl: URL } & CollectionEntry<'docs'>['data'];
 const { ogLocale, image, title, description, canonicalUrl } = Astro.props;
 const lang = getLanguageFromURL(canonicalUrl.href);
 
-const formattedContentTitle = `${title} - ${useTranslation(lang)['title']}`;
+const formattedContentTitle = `${(title.length > 0) ? title + ' - ' : ''}${useTranslation(lang)['title']}`;
 const imageSrc = image?.src ?? OPEN_GRAPH.image.src;
 const canonicalImageSrc = new URL(imageSrc, Astro.site);
 const imageAlt = image?.alt ?? OPEN_GRAPH.image.alt;
