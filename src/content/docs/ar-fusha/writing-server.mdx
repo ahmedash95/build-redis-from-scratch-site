@@ -1,0 +1,125 @@
+---
+title: "كتابة السيرفر"
+description: ""
+---
+import Alert from '../../../components/Alerts/Alert.astro';
+
+
+الخطوة الأولى هي أن نبدأ بـ TCP listener حتى يتمكن أي [عميل](first-steps#%D8%AA%D8%AC%D9%87%D9%8A%D8%B2-%D8%A7%D9%84%D8%B9%D9%85%D9%8A%D9%84) من التواصل معه
+
+
+```go
+l, err := net.Listen("tcp", ":6379")
+if err != nil {
+    fmt.Println(err)
+    return
+}
+```
+
+
+ثم سنبدأ في استقبال الطلبات
+
+
+```go
+conn, err := l.Accept()
+if err != nil {
+    fmt.Println(err)
+    return
+}
+
+defer conn.Close() // إغلاق الاتصال عند الانتهاء
+```
+
+
+ثم سنقوم بإنشاء حلقة تكرارية لا نهائية واستقبال الأوامر من العملاء والرد عليها
+
+
+```go
+for {
+    buf := make([]byte, 1024)
+
+    // قراءة الرسالة من العميل
+    _, err = conn.Read(buf)
+    if err != nil {
+        if err == io.EOF {
+            break
+        }
+        fmt.Println("خطأ في قراءة الرسالة من العميل: ", err.Error())
+        os.Exit(1)
+    }
+
+    // تجاهل الطلب وإرسال PONG كرد
+    conn.Write([]byte("+OK\r\n"))
+}
+```
+
+
+لاحظ أننا في السطر الأخير نرد بـ Ok بغض النظر عن الأمر الذي يأتي من العميل.
+
+بالتالي، الشفرة الكاملة ستكون كالتالي:
+
+
+```go
+package main
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+)
+
+func main() {
+	fmt.Println("الاستماع على المنفذ :6379")
+
+	// إنشاء سيرفر جديد
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// الاستماع للاتصالات
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		buf := make([]byte, 1024)
+
+		// قراءة الرسالة من العميل
+		_, err = conn.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			fmt.Println("خطأ في قراءة الرسالة من العميل: ", err.Error())
+			os.Exit(1)
+		}
+
+		// تجاهل الطلب وإرسال PONG كرد
+		conn.Write([]byte("+OK\r\n"))
+	}
+}
+```
+
+
+
+إذا قمنا بتشغيل السيرفر والتواصل معه باستخدام redis-cli، يمكننا رؤية الاستجابة المتوقعة
+
+<Alert type="info">
+لاحظ هنا أن المنفذ هو نفس رقم Redis
+</Alert>
+
+![CLI OUTPUT](/images/build-redis-from-scratch/part-1/cli-output.png)
+
+
+## الخاتمة
+
+هكذا انتهينا من الجزء الأول، حيث قمنا بإنشاء سيرفر يمكن لأي عميل Redis التواصل معه واستقبال الردود منه.
+
+حاليًا، الاستجابة هي مجرد Ok ولكن في الأجزاء القادمة سنقوم بتغيير ذلك للرد على أوامر مثل set و get و hset و hget.

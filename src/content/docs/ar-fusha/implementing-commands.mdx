@@ -1,0 +1,979 @@
+---
+title: "كتابة اوامر Redis"
+description: ""
+---
+
+قمنا بكتابة المسلسل وتعرفنا على كيفية الرد على العميل بعد أن يرسل لنا أي أوامر.
+
+الآن سنقوم ببناء "CommandsHandler" وبدء كتابة بعض أوامر Redis.
+
+## "CommandsHandler"
+
+تحدثنا سابقًا عن أن الطلب الذي نتلقاه من العميل سيكون مصفوفة RESP تخبرنا بأي أمر سيتم إرساله لنا.
+
+لذلك ، عادةً ما نقوم بتعريف المعالج عن طريق اسم الأمر الذي هو العنصر الأول في مصفوفة RESP ، والباقي سيكون الوسائط.
+
+لذا دعنا نقوم بإنشاء ملف جديد بعنوان "handler.go" ونعرف فيه معالجنا.
+
+```go
+var Handlers = map[string]func([]Value) Value
+```
+
+ثم سنقوم بكتابة أول أمر وهو "PING".
+
+```go
+func ping(args []Value) Value {
+	return Value{typ: "string", str: "PONG"}
+}
+```
+
+ثم سنضيف هذا الأمر إلى الخريطة المعالجة التي أنشأناها.
+
+```go
+var Handlers = map[string]func([]Value) Value{
+	"PING": ping,
+}
+```
+
+<Alert type="info">
+لاحظ أننا كتبنا الاسم بحروف كبيرة لأن هذه الأوامر في Redis غير حساسة لحالة الأحرف.
+</Alert>
+
+ثم ، لاختبار أمر "PING" ، سنقوم بتغيير الـ main.go لإرسال كائن القيمة إلى المعالج.
+
+```go
+for {
+	resp := NewResp(conn)
+	value, err := resp.Read()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	if value.typ != "array" {
+		fmt.Println("Invalid request, expected array")
+		continue
+	}
+
+	if len(value.array) == 0 {
+		fmt.Println("Invalid request, expected array length > 0")
+		continue
+	}
+
+	command := strings.ToUpper(value.array[0].bulk)
+	args := value.array[1:]
+
+	writer := NewWriter(conn)
+
+	handler, ok := Handlers[command]
+	if !ok {
+		fmt.Println("Invalid command: ", command)
+		writer.Write(Value{typ: "string", str: ""})
+		continue
+	}
+
+	result := handler(args)
+	writer.Write(result)
+}
+```
+
+ما قمنا به هو استلام الطلب الأول واستخراج كائن القيمة منه. ثم قمنا ببعض التحققات للتأكد من أن الأمر هو مصفوفة وليس فارغًا. ثم قمنا بأخذ العنصر الأول في المصفوفة وتحويله إلى حالة الأحرف الكبيرة لأنه سيكون اسم الأمر. والوسائط ستكون بقية عناصر المصفوفة.
+
+إذا كان الشرح غير واضح بالنسبة لك ، فإليك شكل كائن القيمة عندما نقول على سبيل المثال SET name Ahmed
+
+```go
+Value{
+	typ: "array",
+	array: []Value{
+		Value{typ: "bulk", bulk: "SET"},
+		Value{typ: "bulk", bulk: "name"},
+		Value{typ: "bulk", bulk: "Ahmed"},
+	},
+}
+```
+
+بالتالي ، ستكون الأمر والوسائط على النحو التالي
+
+```go
+command := Value{typ: "bulk", bulk: "SET"}.bulk // "SET"
+
+args := []Value{
+	Value{typ: "bulk", bulk: "name"},
+	Value{typ: "bulk", bulk: "Ahmed"},
+}
+```
+
+حسنًا ، في Redis ، يأخذ أمر PING وسيطًا ويعيده بدلاً من كلمة PONG إذا كان موجودًا. لذا إذا جئنا لتطبيق ذلك
+
+```go
+func ping(args []Value) Value {
+	if len(args) == 0 {
+		return Value{typ: "string", str: "PONG"}
+	}
+
+	return Value{typ: "string", str: args[0].bulk}
+}
+```
+
+## أوامر SET و GET
+
+الخطوات المقبلة ستكون سهلة وتعتمد على معرفتك بلغة Go والهياكل البيانات. لأن الجزء الصعب قد انتهى عندما قمنا بتنفيذ RESP والمعالج.
+
+في Redis ، يكون SET عبارة عن مفتاح وقيمة. في أي وقت تقوم فيه بـ SET للمفتاح بقيمة معينة. وفي أي وقت يمكنك الحصول عليها مرة أخرى باستخدام أمر GET.
+
+الهيكل البيانات الذي سنستخدمه هو خريطة تجمع (Hash Map) أو `map[string]string`
+
+لذا دعنا نذهب إلى "handler.go" ونعرف أمر SET
+
+```go
+var SETs = map[string]string{}
+var SETsMu = sync.RWMutex{}
+
+func set(args []Value) Value {
+	if len(args) != 2 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'set' command"}
+	}
+
+	key := args[0].bulk
+	value := args[1].bulk
+
+	SETsMu.Lock()
+	SETs[key] = value
+	SETsMu.Unlock()
+
+	return Value{typ: "string", str: "OK"}
+}
+```
+
+<Alert type="info">
+نستخدم `sync.RWMutex` لأنه من المفترض أن يستقبل الخادم الطلبات بشكل متزامن. ونستخدم `RWMutex` للتأكد من أن الخريطة SETs لن تتغير من أكثر من خيط في نفس الوقت.
+</Alert>
+
+أعتقد أنك تتخيل كيف يعمل أمر GET. ببساطة ، إذا وجدنا المفتاح ، فسنعيده ، وإذا لم يكن موجودًا ، فسنعيد قيمة فارغة.
+
+```go
+func get(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'get' command"}
+	}
+
+	key := args[0].bulk
+
+	SETsMu.RLock()
+	value, ok := SETs[key]
+	SETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	return Value{typ: "bulk", bulk: value}
+}
+```
+
+بعد أن قمنا بتنفيذ أوامر SET و GET ، سنقوم بتسجيلها في خريطة المعالجة.
+
+```go
+var Handlers = map[string]func([]Value) Value{
+	"PING": ping,
+	"SET":  set,
+	"GET":  get,
+}
+```
+
+## أوامر HSET و HGET
+
+ببساطة ، هذا هو خريطة تحتوي على خريطة داخلها. وهو عبارة عن `map[string]map[string]string`. يأخذ اسم الهاش ومفتاح وقيمة. لتخزين البيانات مثل
+
+```go
+{
+	"users": {
+		"u1": "Ahmed",
+		"u2": "Mohamed",
+	},
+	"posts": {
+		"p1": "Hello World",
+		"p2": "Welcome to my blog",
+	},
+}
+```
+
+لذا ، على سبيل المثال ، إذا قمنا بتخزين المستخدم الذي يحمل اسم Ahmed بمعرف u1. سنستخدم أمر HSET
+
+```bash
+HSET users u1 Ahmed
+```
+
+وإذا قمنا بتخزين المنشور الذي يحمل اسم Hello World بمعرف u1. سنستخدم أمر HSET
+
+```bash
+HSET posts u1 Hello World
+```
+
+وإذا قمنا بجلب المستخدم Ahmed ، سنستخدم أمر HGET
+
+```bash
+HGET users u1
+```
+
+سيكون الكود قريبًا جدًا من أوامر SET و GET. الفرق بينهم هو أن HSETs ستكون `map[string]map[string]string`
+
+```go
+var HSETs = map[string]map[string]string{}
+var HSETsMu = sync.RWMutex{}
+
+func hset(args []Value) Value {
+	if len(args) != 3 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hset' command"}
+	}
+
+	hash := args[0].bulk
+	key := args[1].bulk
+	value := args[2].bulk
+
+	HSETsMu.Lock()
+	if _, ok := HSETs[hash]; !ok {
+		HSETs[hash] = map[string]string{}
+	}
+	HSETs[hash][key] = value
+	HSETsMu.Unlock()
+
+	return Value{typ: "string", str: "OK"}
+}
+```
+
+وسيكون HGET على النحو التالي
+
+```go
+func hget(args []Value) Value {
+	if len(args) != 2 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hget' command"}
+	}
+
+	hash := args[0].bulk
+	key := args[1].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash][key]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	return Value{typ: "bulk", bulk: value}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+ببساطة ، بعد أن نحصل على المفتاح والقيمة من الهاش ، سنقوم بعمل حلقة على كل مفتاح وقيمة وتخزينهم في مصفوفة. ثم سنعيد المصفوفة ككائن قيمة.
+
+أمر HGETALL لديه تنفيذ بسيط لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+```go
+func hgetall(args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
+	}
+
+	hash := args[0].bulk
+
+	HSETsMu.RLock()
+	value, ok := HSETs[hash]
+	HSETsMu.RUnlock()
+
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	values := []Value{}
+	for k, v := range value {
+		values = append(values, Value{typ: "bulk", bulk: k})
+		values = append(values, Value{typ: "bulk", bulk: v})
+	}
+
+	return Value{typ: "array", array: values}
+}
+```
+
+بهذه الطريقة ، قمنا بتنفيذ أوامر HSET و HGET. هناك أمر آخر هو HGETALL وهو يعيد جميع المفاتيح والقيم في الهاش.
+
+```bash
+> HGETALL users
+
+u1 Ahmed
+u2 Mohamed
+```
+
+لكن تطبيقه سيكون سهلاً لأن كائن القيمة يمكنه حمل البيانات الضخمة وإرجاعها كخريطة.
+
+الختام
+
+حتى الآن ، قمنا ببناء قاعدة بيانات InMemory ويمكننا القول إنها متوافقة مع خادم Redis في الأوامر التي ندعمها. الاختلاف مع Redis هو الأوامر الأخرى التي لا نزال لا ندعمها. ويمكن اعتبار ذلك تحديًا لك لتبدأ في استكشاف الأوامر التي ترغب في تنفيذها بنفسك وتجربتها.
+
+المشكلة الحالية هي أننا نفقد البيانات التي نخزنها تمامًا لأننا نعتمد على الذاكرة فقط. لذا ، في الجزء القادم ، سنحتاج إلى آخر خطوة وهي الاستمرارية في البيانات وسنرى كيف يمكننا استخدام AOF لحفظ البيانات على القرص. وكيف يمكننا قراءتها مرة أخرى عندما يتم تشغيل الخادم.

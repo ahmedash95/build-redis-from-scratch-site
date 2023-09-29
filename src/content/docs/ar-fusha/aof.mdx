@@ -1,0 +1,236 @@
+---
+title: "كتابة البيانات علي الـDisk"
+description: ""
+---
+
+في الأجزاء السابقة، قمنا بإنشاء قاعدة بيانات InMemory وضبطها لتكون متوافقة مع Redis عن طريق بروتوكول RESP.
+
+في هذا الجزء، سنقوم بتطبيق "الاستمرارية في البيانات" (data persistence) وهي ميزة مهمة لأي قاعدة بيانات حتى لو كانت InMemory، لأن هناك حالات عديدة يمكنك استخدام الذاكرة لتنفيذ عمليات مختلفة على البيانات. ومع ذلك، يمكن للأداة أيضًا أن توفر لك الاستدامة (durability) عن طريق تخزين البيانات على الـDisk، حتى إذا حدثت أي أعطال أو إعادة تشغيل للخادم، فلن تفقد هذه البيانات وهذا أمر مهم.
+
+جزء الـPersistence واسع جدًا ويختلف حسب الطريقة التي تستخدمها لتخزين البيانات وكيفية تنفيذ ذلك. على سبيل المثال، قواعد البيانات العلائقية مثل SQLite و MySQL لا يمكن أن يتم فقدان سجل واحد بأي حالة من الأحوال. وكود هذا الجزء معقد جدًا لضمان ذلك.
+
+ونفس الأمر ينطبق على Redis. هناك طرق مختلفة لتسجيل هذه البيانات حسب حالتك:
+
+- RDB (Redis Database): وهي عبارة عن نسخة لحظية من البيانات يتم إنشاؤها بفترة زمنية محددة وفقًا للتكوين. على سبيل المثال، كل 3 دقائق أو كل 10 دقائق حسب كيفية ضبطها. وما يحدث هو أن Redis يأخذ نسخة كاملة من البيانات الموجودة في الذاكرة ويحفظها في ملف. وعند حدوث إعادة تشغيل أو عطل، يتم استعادة البيانات من ملف RDB.
+
+- AOF (Append only file): وما يحدث هنا هو أن Redis يسجل كل أمر في الملف كـ RESP، وعند حدوث إعادة تشغيل، يقوم Redis بقراءة جميع أوامر RESP من ملف AOF وتنفيذها على الذاكرة.
+
+## AOF
+
+الطريقة التي سنستخدمها والتي هي سهلة لأننا يمكننا ربطها بالـ RESP الذي قمنا بإنشائه. كلما قمنا بتنفيذ أمر، سنقوم بتسجيل RESP الخاص به في الملف، وعندما يبدأ الخادم/الكود في العمل، سيقرأ من ملف AOF ويعيد إرسال هذه الأوامر إلى القارئ وسينفذها على الذاكرة.
+
+قبل أن نبدأ، دعني أوضح لك شكل ملف AOF:
+
+إذا قمنا بتنفيذ 2 أمر:
+
+```go
+> set name ahmed
+> set website ahmedash95.github.io
+```
+
+فسيكون محتوى الملف كالتالي:
+
+```go
+*2
+$3
+set
+$4
+name
+*3
+$3
+set
+$4
+name
+$5
+ahmed
+*3
+$3
+set
+$7
+website
+$20
+ahmedash95.github.io
+```
+
+أعتقد أنه أصبح سهلاً عليك قراءة بروتوكول RESP وفهمه بسبب تطبيقنا السابق عليه.
+
+## كتابة الـ AOF struct
+
+أول خطوة سنقوم بها هي إنشاء ملف aof.go وسيحتوي على جميع الكود المتعلق بـ AOF.
+
+- أولاً، سنقوم بإنشاء هيكل Aof والذي سيحتوي على الملف الذي سيتم تخزينه على الـ Disk وقارئ bufio لقراءة أوامر RESP من الملف.
+
+```go
+type Aof struct {
+	file *os.File
+	rd   *bufio.Reader
+	mu   sync.Mutex
+}
+```
+
+ثم سنقوم بإنشاء طريقة NewAof لاستخدامها في main.go عند بدء تشغيل الخادم.
+
+```go
+func NewAof(path string) (*Aof, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		return nil, err
+	}
+
+	aof := &Aof{
+		file: f,
+		rd:   bufio.NewReader(f),
+	}
+
+	// start go routine to sync aof to disk every 1 second
+	go func() {
+		for {
+			aof.mu.Lock()
+
+			aof.file.Sync()
+
+			aof.mu.Unlock()
+
+			time.Sleep(time.Second)
+		}
+	}()
+
+	return aof, nil
+}
+```
+
+- ما يحدث هنا هو أننا في الخطوة الأولى نقوم بإنشاء الملف إذا لم يكن موجودًا، أو نفتحه إذا كان موجودًا.
+- ثم نقوم بإنشاء قارئ bufio لقراءة الملف.
+- نقوم بإنشاء go routine لضمان تسجيل ملف AOF كل ثانية على الـ Disk طالما الخادم يعمل.
+
+<Alert type="info">
+فكرة تنفيذ sync كل ثانية تضمن أن التغييرات التي قمنا بها موجودة على الـ Disk. بدون sync، ستكون الأمور في يد نظام التشغيل لتقرر متى يتم تنفيذ flush للملف على الـ Disk.
+
+بهذه الطريقة، نضمن أن البيانات ستظل موجودة دائمًا حتى في حالة حدوث عطل. وإذا فقدنا أي بيانات، فستكون خلال الثانية التي حدث فيها العطل، وهذه نسبة مقبولة.
+
+إذا كنت ترغب في الاستدامة بنسبة 100٪، فيجب علينا تنفيذ sync للملف في كل أمر. ولكن الأداء سيكون سيئًا للكتابة، لأن الـ IO عملية مكلفة.
+</Alert>
+
+الطريقة التالية هي الإغلاق (Close) والتي تضمن أن الملف سيتم إغلاقه بشكل صحيح عند إيقاف تشغيل الخادم.
+
+```go
+func (aof *Aof) Close() error {
+	aof.mu.Lock()
+	defer aof.mu.Unlock()
+
+	return aof.file.Close()
+}
+```
+
+ثم سنقوم بإنشاء طريقة الكتابة (Write) والتي سنستخدمها لكتابة الأمر على الملف في كل طلب يأتي من العميل.
+
+```go
+func (aof *Aof) Write(value Value) error {
+	aof.mu.Lock()
+	defer aof.mu.Unlock()
+
+	_, err := aof.file.Write(value.Marshal())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+```
+
+لاحظ أننا استخدمنا `v.Marshal()` لتسجيل الأمر على الملف كما يقوم Redis بإرساله لنا عندما نقوم بقراءة الملف فيما بعد، حتى نتمكن من قراءة هذه الأسطر RESP وتحليلها وكتابتها مرة أخرى في الذاكرة.
+
+## كتابة الـ AOF
+
+كل ما نحتاجه هو استخدام NewAof في main.go وكتابة الأمر في ملف AOF في كل طلب يأتي من العميل.
+
+```go
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	aof, err := NewAof("database.aof")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer aof.Close()
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		resp := NewResp(conn)
+		value, err := resp.Read()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		if value.typ != "array" {
+			fmt.Println("Invalid request, expected array")
+			continue
+		}
+
+		if len(value.array) == 0 {
+			fmt.Println("Invalid request, expected array length > 0")
+			continue
+		}
+
+		command := strings.ToUpper(value.array[0].bulk)
+		args := value.array[1:]
+
+		writer := NewWriter(conn)
+
+		handler, ok := Handlers[command]
+		if !ok {
+			fmt.Println("Invalid command: ", command)
+			writer.Write(Value{typ: "string", str: ""})
+			continue
+		}
+
+		if command == "SET" || command == "HSET" {
+			aof.Write(value)
+		}
+
+		result := handler(args)
+		writer.Write(result)
+	}
+}
+```
+
+<Alert type="info">
+لاحظ أننا نقوم بكتابة الأوامر التي تقوم بعملية الـ set فقط، لأن أي أوامر أخرى مثل get و hget و hgetall لا نحتاج لتخزينها ولن تؤثر علينا سوى بزيادة حجم ملف AOF.
+</Alert>
+
+إذا قمنا بتشغيل الخادم ونفذنا الأمر التالي:
+
+```bash
+set name ahmed
+```
+
+سنجد أن ملف `database.aof` يحتوي على المحتوى التالي:
+
+```bash
+*3
+$3
+set
+$4
+name
+$5
+ahmed
+```
+
+هكذا انتهينا من الـ AOF وعرفنا كيفية تنفيذ استمرارية البيانات على الـ Disk. وتذكر أن AOF هو نفس الطريقة التي يستخدمها Redis لتنفيذ الاستمرارية. يمكنك قراءة [هذه المقالة](https://www.memurai.com/blog/redis-persistence-deep-dive) لمزيد من التفاصيل حول الفرق بين RDB و AOF.
