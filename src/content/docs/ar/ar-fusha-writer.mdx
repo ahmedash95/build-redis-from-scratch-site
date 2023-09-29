@@ -1,0 +1,343 @@
+في المقالة السابقة، قمنا بكتابة الجزء الأول من RESP وهو Parsing والذي يقوم بتحويل RESP إلى كائن قيمة (Value Object) حيث يمكننا من خلاله معرفة الأوامر التي أرسلها العميل. في هذا الجزء، سنرى كيف يمكننا الرد على العميل بواسطة RESP وكتابة الـ Writer.
+
+نحن نستخدم القيمة (Value) لتحويل RESP إلى هيكل Go struct حتى نتمكن من فهم ما هو المطلوب. سنستخدم القيمة (Value) أيضًا لتسجيل الرد الذي سنقوم بإرساله إلى العميل سواء كان سلسلة (String) أو سلسلة ضخمة (Bulk) أو مصفوفة (Array).
+
+أول خطوة نحتاج إلى القيام بها هي كتابة الـ Marshal الذي سيحول القيمة إلى بايتات تمثل استجابة RESP.
+
+## كتابة مسلسل القيمة (Value Serializer)
+
+- أولاً، سنقوم بكتابة الوظيفة Marshal والتي سنستدعي منها الوظائف الخاصة بكل نوع من الأنواع حسب نوع القيمة.
+
+```go
+func (v Value) Marshal() []byte {
+	switch v.typ {
+	case "array":
+		return v.marshalArray()
+	case "bulk":
+		return v.marshalBulk()
+	case "string":
+		return v.marshalString()
+	case "null":
+		return v.marshallNull()
+	case "error":
+		return v.marshallError()
+	default:
+		return []byte{}
+	}
+}
+```
+
+كما هو معتاد، سنتحقق من نوع القيمة ومن ثم سنستدعي الوظيفة التي تتعامل مع هذا النوع.
+
+### السلاسل البسيطة (Simple Strings)
+
+أول نوع سنتعامل معه هو السلسلة البسيطة لأنها سهلة.
+
+```go
+func (v Value) marshalString() []byte {
+	var bytes []byte
+	bytes = append(bytes, STRING)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+```
+
+ببساطة، سنقوم بإنشاء مصفوفة بايت ونضيف السلسلة ثم [CRLF](https://developer.mozilla.org/en-US/docs/Glossary/CRLF). يجب أن تكون هناك CRLF وإلا ستحدث مشكلة لأن العميل RESP لن يفهم الاستجابة بدونه.
+
+### سلسلة ضخمة (Bulk String)
+
+```go
+func (v Value) marshalBulk() []byte {
+	var bytes []byte
+	bytes = append(bytes, BULK)
+	bytes = append(bytes, strconv.Itoa(len(v.bulk))...)
+	bytes = append(bytes, '\r', '\n')
+	bytes = append(bytes, v.bulk...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+```
+
+### المصفوفة (Array)
+
+```go
+func (v Value) marshalArray() []byte {
+	len := len(v.array)
+	var bytes []byte
+	bytes = append(bytes, ARRAY)
+	bytes = append(bytes, strconv.Itoa(len)...)
+	bytes = append(bytes, '\r', '\n')
+
+	for i := 0; i < len; i++ {
+		bytes = append(bytes, v.array[i].Marshal()...)
+	}
+
+	return bytes
+}
+```
+
+لاحظ أنه في حالة المصفوفة، نستدعي طريقة Marshal داخل الحلقة لتحويل كائن القيمة بغض النظر عن نوعه. وهذا هو المقصود بالاستدعاء المتكرر الذي ذكرناه في الجزء الأول عند كتابة الجزء Parsing.
+
+### القيمة الفارغة (Null) والخطأ (Error)
+
+أخيرًا، نحتاج إلى القيمة الفارغة والخطأ للرد على العميل بأن البيانات غير موجودة أو هناك خطأ.
+
+```go
+func (v Value) marshallError() []byte {
+	var bytes []byte
+	bytes = append(bytes, ERROR)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshallNull() []byte {
+	return []byte("$-1\r\n")
+}
+```
+
+## Resp.go
+
+بهذا نكون قد انتهينا من كتابة الـ RESP بالكامل.
+
+```go
+// Marshal Value to bytes
+func (v Value) Marshal() []byte {
+	switch v.typ {
+	case "array":
+		return v.marshalArray()
+	case "bulk":
+		return v.marshalBulk()
+	case "string":
+		return v.marshalString()
+	case "null":
+		return v.marshallNull()
+	case "error":
+		return v.marshallError()
+	default:
+		return []byte{}
+	}
+}
+
+func (v Value) marshalString() []byte {
+	var bytes []byte
+	bytes = append(bytes, STRING)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshalBulk() []byte {
+	var bytes []byte
+	bytes = append(bytes, BULK)
+	bytes = append(bytes, strconv.Itoa(len(v.bulk))...)
+	bytes = append(bytes, '\r', '\n')
+	bytes = append(bytes, v.bulk...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshalArray() []byte {
+	len := len(v.array)
+	var bytes []byte
+	bytes = append(bytes, ARRAY)
+	bytes = append(bytes, strconv.Itoa(len)...)
+	bytes = append(bytes, '\r', '\n')
+
+	for i := 0; i < len; i++ {
+		bytes = append(bytes, v.array[i].Marshal()...)
+	}
+
+	return bytes
+}
+
+func (v Value) marshallError() []byte {
+	var bytes []byte
+	bytes = append(bytes, ERROR)
+	bytes = append(bytes, v.str...)
+	bytes = append(bytes, '\r', '\n')
+
+	return bytes
+}
+
+func (v Value) marshallNull() []byte {
+	return []byte("$-1\r\n")
+}
+```
+
+بهذا نكون قد انتهينا من 90% من الـ Writer ولم يتبق سوى كتابة البايتات التي نحصل عليها من طريق الـ Marshal method إلى الـ Writer.
+
+## كتابة الـ Writer
+
+لكتابة الـ Writer، الأمر بسيط جدًا. كل ما نحتاجه هو هيكل الـ Writer والذي يأخذ io.Writer.
+
+```go
+type Writer struct {
+	writer io.Writer
+}
+
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{writer: w}
+}
+```
+
+ثم نقوم بكتابة الوظيفة التي تأخذ القيمة وتكتب البايتات التي نحصل عليها من طريق الـ Marshal method على الـ Writer.
+
+```go
+func (w *Writer) Write(v Value) error {
+	var bytes = v.Marshal()
+
+	_, err := w.writer.Write(bytes)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+```
+
+لاحظ أننا نستخدم الـ Marshal method للحصول على البايتات.
+
+وبهذا يكون لدينا الآن القدرة على الرد على أوامر Redis مثل [PING](https://redis.io/commands/ping/)، [SET](https://redis.io/commands/set/)، [GET](https://redis.io/commands/get/)، [HSET](https://redis.io/commands/hset/)، [HGET](https://redis.io/commands/hget/)، و [HGETALL](https://redis.io/commands/hgetall/) ورؤية كيف يمكننا تنفيذها في Go.
+
+## الأمثلة على الـ Marshal
+
+### السلسلة البسيطة (Simple String)
+
+إذا كنا نريد الرد بـ سلسلة "OK" مثلاً:
+
+```go
+v := Value{typ: "string", str: "Ok"}
+fmt.Println(string(v.Marshal()))
+```
+
+ستكون الاستجابة كالتالي:
+
+```bash
++Ok\r\n
+```
+
+### سلسلة ضخمة (Bulk String)
+
+إذا كنا نريد الرد بـ سلسلة ضخمة:
+
+```go
+v := Value{typ: "bulk", bulk: "Hello World"}
+fmt.Println(string(v.Marshal()))
+```
+
+ستكون الاستجابة كالتالي:
+
+```bash
+$11\r\nHello World\r\n
+```
+
+### المصفوفة (Array)
+
+إذا كنا نريد الرد بـ مصفوفة:
+
+```go
+v := Value{typ: "array", array: []Value{
+	Value{typ: "string", str: "Hello"},
+	Value{typ: "string", str: "World"},
+}}
+fmt.Println(string(v.Marshal()))
+```
+
+ستكون الاستجابة كالتالي:
+
+```bash
+*2\r\n$5\r\nHello\r\n$5\r\nWorld\r\n
+```
+
+وبهذا نكون قد انتهينا ونحن جاهزون لكتابة البايتات التي نحصل عليها من طريق الـ Marshal method إلى الـ Writer.
+
+## كتابة الـ Writer
+
+لكتابة الـ Writer، الأمر بسيط جدًا. كل ما نحتاجه هو هيكل الـ Writer والذي يأخذ io.Writer.
+
+```go
+type Writer struct {
+	writer io.Writer
+}
+
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{writer: w}
+}
+```
+
+ثم نقوم بكتابة الوظيفة التي تأخذ القيمة وتكتب البايتات التي نحصل عليها من طريق الـ Marshal method على الـ Writer.
+
+```go
+func (w *Writer) Write(v Value) error {
+	var bytes = v.Marshal()
+
+	_, err := w.writer.Write(bytes)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+```
+
+وبهذا يكون لدينا الآن القدرة على الرد على أوامر Redis مثل [PING](https://redis.io/commands/ping/)، [SET](https://redis.io/commands/set/)، [GET](https://redis.io/commands/get/)، [HSET](https://redis.io/commands/hset/)، [HGET](https://redis.io/commands/hget/)، و [HGETALL](https://redis.io/commands/hgetall/) ورؤية كيف يمكننا تنفيذها في Go.
+
+## الخاتمة
+
+بهذا نكون قد انتهينا من تسلسل وفك تسلسل RESP بالإضافة إلى كتابة الـ Reader والـ Writer التي ستساعدنا في الرد على العميل بسهولة.
+
+أخيرًا، سنقوم بتعديل main.go ليقوم بالرد عن طريق الـ Writer.
+
+```go
+package main
+
+import (
+	"fmt"
+	"net"
+)
+
+func main() {
+	fmt.Println("Listening on port :6379")
+
+	// Create a new server
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Listen for connections
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		resp := NewResp(conn)
+		value, err := resp.Read()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		_ = value
+
+		writer := NewWriter(conn)
+		writer.Write(Value{typ: "string", str: "OK"})
+	}
+}
+```
+
+![cli output](/images/build-redis-from-scratch/part-3/cli-output.png)
+
+في الجزء القادم، سنبدأ في الرد على أوامر مثل [PING](https://redis.io/commands/ping/)، [SET](https://redis.io/commands/set/)، [GET](https://redis.io/commands/get/)، [HSET](https://redis.io/commands/hset/)، [HGET](https://redis.io/commands/hget/)، و [HGETALL](https://redis.io/commands/hgetall/) ونرى كيف يمكننا تنفيذها في Go.
