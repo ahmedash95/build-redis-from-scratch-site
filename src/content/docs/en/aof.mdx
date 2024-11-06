@@ -237,7 +237,33 @@ That's it for the writing part. Now, we need to read the commands from the AOF f
 
 ## Reading the AOF
 
-Initially, we created the `Read` method, and all we need to do is call it at the beginning of `main.go`.
+While reading the AOF file, we can assume that it is a valid file in this example, since we created it ourselves. In the real world, this will not always be the case as the file might have been corrupted. First we need to add a `Read` method to the AOF struct.
+
+```go
+func (aof *Aof) Read(callback func(value Value)) error {
+	aof.mu.Lock()
+	defer aof.mu.Unlock()
+
+	resp := NewResp(aof.file)
+
+	for {
+		value, err := resp.Read()
+		if err == nil {
+			callback(value)
+		}
+		if err == io.EOF {
+			break
+		}
+		return err
+	}
+
+	return nil
+}
+```
+
+Our `Read` method here takes a callback function with an argument of type `Value`. We start an infinite loop to read the aof file. It is important to know that files implement the `io.Reader` interface, hence why we can pass a connection in `main.go` and also pass a file here. In this loop, our exit conditions are the following; the error returned is `io.EOF` which indicates that we have reached the end of the file. This is a 'good' error for us here and we can simply break to end the infinite loop. If any other error is returned, we return it to the caller.
+
+All we need to do now is call `aof.Read` at the beginning of `main.go`.
 
 ```go
 func main() {
