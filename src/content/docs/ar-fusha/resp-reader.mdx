@@ -1,0 +1,360 @@
+---
+title: "قراءة الـ RESP"
+description: ""
+---
+import Alert from '../../../components/Alerts/Alert.astro';
+
+
+تحدثنا في [الخطوات الأولى](first-steps#ازاي-redis-بيشتغل) عن كيفية استقبال الأوامر من العميل وشكل الطلب (request) المرسل. الآن سنشرح كيفية قراءة الـ RESP وتحليله.
+
+## كيفية التعامل مع الـ IO
+
+لكي نتمكن من كتابة محلل (parser)، نحتاج أولاً أن نفهم شكل البيانات التي سنستقبلها لكي نتمكن من تحليلها. في لغة Go، هناك العديد من المكتبات التي تساعدنا في التعامل مع الـ IO، ولكننا سنستخدم منها [Bufio](https://golang.org/pkg/bufio/) لأنها تحتوي على العديد من الوظائف التي تساعدنا في التعامل مع البيانات بشكل أسرع مثل ReadLine و ReadByte.
+
+على سبيل المثال، إذا استقبلنا بيانات من العميل عبارة عن سلسلة نصية مكتوبة بتنسيق RESP:
+
+```bash
+$5\r\nAhmed\r\n
+```
+
+فما نحتاجه هو قراءة البايت الأول الذي هو $ لنعرف نوع البيانات التي سنبدأ في قراءتها. ثم نقرأ الرقم لنعرف عدد البايتات التي نحتاج لقراءتها وهو 5 بالإضافة إلى 2 بايت آخرين وهما \r\n.
+
+<Alert type="info">
+الـ `\r\n` تعني نهاية السطر (CRLF) ويجب أن ننتهي هنا.
+</Alert>
+
+## دعنا نرى كيفية القيام بذلك
+
+- سنقوم بإنشاء سلسلة نصية وتحويلها إلى مخزن Bufio
+
+```go
+input := "$5\r\nAhmed\r\n"
+
+reader := bufio.NewReader(strings.NewReader(input))
+```
+
+الآن بعد قراءة الاسم من سلسلة RESP، نحتاج إلى القيام بالخطوات التالية:
+
+- قراءة نوع بيانات الـ RESP الذي هو البايت الأول في المخزن
+- ثم قراءة الرقم الذي يعبر عن عدد البايتات التي نحتاج لقراءتها
+- ثم إنشاء مصفوفة بايت بحجم الرقم الذي قرأناه وقراءة هذه البايتات
+- وبهذا الشكل لدينا السلسلة التي سنستقبلها من العميل
+
+- قراءة البايت الأول لمعرفة نوع بيانات الـ RESP
+
+```go
+b, _ := reader.ReadByte()
+
+if b != '$' {
+    fmt.Println("نوع غير صالح، يجب أن يكون البيانات نصية فقط")
+    os.Exit(1)
+}
+```
+
+- ثم قراءة الرقم لمعرفة عدد حروف النص الذي سنقرأه
+
+```go
+size, _ := reader.ReadByte()
+
+strSize, _ := strconv.ParseInt(string(size), 10, 64)
+
+// استهلاك /r/n
+reader.ReadByte()
+reader.ReadByte()
+```
+
+بهذا الشكل، قرأنا البايت الذي يعرفنا بنوع بيانات الـ RESP وبعدها الرقم الذي يعبر عن عدد حروف النص الذي سنقرأه. ثم قرأنا 2 بايت آخرين للتخلص من \r\n التي تلي الرقم.
+
+وبهذا، يكون مخزن القراءة الخاص بنا واقفًا عند البايت رقم 5 الذي هو حرف A.
+
+```go
+$
+5
+\r
+\n
+A
+h
+m
+e
+d
+\r
+\n
+```
+
+وبما أننا نعرف عدد الحروف أو البايتات التي سنقرأها، نحتاج فقط إلى إنشاء مصفوفة بايت وقراءتها
+
+```go
+name := make([]byte, strSize)
+reader.Read(name)
+
+fmt.Println(string(name))
+```
+
+وبهذه الطريقة، بنينا المحلل (parser) الذي يمكننا من التعامل مع جميع أوامر RESP. وهذا هو الكود الكامل الذي كتبناه في الخطوات السابقة.
+
+```go
+package main
+
+import (
+    "bufio"
+    "fmt"
+    "strings"
+    "os"
+    "strconv"
+)
+
+func main() {
+    input := "$5\r\nAhmed\r\n"
+    reader := bufio.NewReader(strings.NewReader(input))
+
+    b, _ := reader.ReadByte()
+
+    if b != '$' {
+      fmt.Println("نوع غير صالح، يجب أن يكون البيانات نصية فقط")
+      os.Exit(1)
+    }
+
+    size, _ := reader.ReadByte()
+
+    strSize, _ := strconv.ParseInt(string(size), 10, 64)
+
+    // استهلاك /r/n
+    reader.ReadByte()
+    reader.ReadByte()
+
+    name := make([]byte, strSize)
+    reader.Read(name)
+
+    fmt.Println(string(name))
+}
+```
+
+## كتابة الـ RESP
+
+سنقوم بإنشاء ملف جديد بعنوان resp.go ليحتوي على جميع الكود المتعلق بتسلسل وفك تسلسل البيانات على المخزن (buffer).
+
+أولاً، لتسهيل التعامل مع أنواع البيانات، سنقوم بتعريف ثوابت تعبر عن كل نوع في الـ RESP.
+
+```go
+const (
+	STRING  = '+'
+	ERROR   = '-'
+	INTEGER = ':'
+	BULK    = '$'
+	ARRAY   = '*'
+)
+```
+
+ثم سنقوم بتعريف هيكل (struct) لكي نستخدمه في عملية التسلسل وفك التسلسل ويحتوي على جميع الأوامر والوسائط التي سنستقبلها من العميل.
+
+```go
+type Value struct {
+	typ   string
+	str   string
+	num   int
+	bulk  string
+	array []Value
+}
+```
+
+**للتوضيح:**
+
+- **typ**: لمعرفة نوع البيانات التي يحملها الـ [*value*](https://redis.io/docs/reference/protocol-spec/#resp-protocol-description)
+- **str**: لحمل قيمة السلسلة البسيطة (simple strings) التي تأتي من الـ [*simple strings*](https://redis.io/docs/reference/protocol-spec/#resp-simple-strings)
+- **num**: لحمل قيمة العدد (integer) الذي يأتي من الـ [*integers*](https://redis.io/docs/reference/protocol-spec/#resp-integers)
+- **bulk**: لتخزين النص الذي سنستقبله من الـ [*bulk strings*](https://redis.io/docs/reference/protocol-spec/#resp-bulk-strings)
+- **array**: لحمل جميع القيم التي تأتي من الـ [*arrays*](https://redis.io/docs/reference/protocol-spec/#resp-arrays)
+
+الآن لدينا هيكل القيمة (Value) الذي سيسهل علينا عملية تحليل (parsing) وفك تحليل أوامر RESP. سنقوم الآن بإنشاء قارئ (Reader) ليحتوي على جميع الأساليب التي ستساعدنا في قراءة البيانات من المخزن وتخزينها في هيكل القيمة.
+
+### القارئ (Reader)
+
+```go
+type Resp struct {
+	reader *bufio.Reader
+}
+
+func NewResp(rd io.Reader) *Resp {
+	return &Resp{reader: bufio.NewReader(rd)}
+}
+```
+
+سنستخدم NewResp فيما بعد لإرسال المخزن من اتصال (connection) الذي قمنا بكتابته في الجزء الأول.
+
+في هذه المرحلة، سنقوم بإنشاء وظيفتين تساعدنا بشكل أساسي في عملية التحليل:
+- **readLine**: لقراءة السطر الذي يأتي من المخزن
+- **readInteger**: لقراءة العدد الذي يأتي من المخزن
+
+وسنقوم بكتابة هذه الوظائف بأنفسنا لأن Bufio لا تحتوي على وظائف تقوم بذلك.
+
+- ReadLine
+
+```go
+func (r *Resp) readLine() (line []byte, n int, err error) {
+	for {
+		b, err := r.reader.ReadByte()
+		if err != nil {
+			return nil, 0, err
+		}
+		n += 1
+		line = append(line, b)
+		if len(line) >= 2 && line[len(line)-2] == '\r' {
+			break
+		}
+	}
+	return line[:len(line)-2], n, nil
+}
+```
+
+في هذه الوظيفة، نقوم بقراءة بايت واحد في كل مرة حتى نصل إلى \r الذي يعني نهاية السطر. ثم نعيد السطر من دون آخر بايتين وهما \r\n.
+
+- ReadInteger
+
+```go
+func (r *Resp) readInteger() (x int, n int, err error) {
+	line, n, err := r.readLine()
+	if err != nil {
+		return 0, 0, err
+	}
+	i64, err := strconv.ParseInt(string(line), 10, 64)
+	if err != nil {
+		return 0, n, err
+	}
+	return int(i64), n, nil
+}
+```
+
+### عملية التحليل (Deserialize)
+
+بعد إنشاء الهياكل والوظائف التي تساعدنا في قراءة البيانات من المخزن، سنقوم الآن بكتابة الوظائف التي ستبدأ في قراءة البيانات من المخزن بشكل متكرر. والتكرار هنا لأن أمر RESP يحتوي على أنواع متداخلة، لذا في كل خطوة من البيانات الواردة، يجب أن نقوم بقراءة القيمة من جديد.
+
+```go
+func (r *Resp) Read() (Value, error) {
+	_type, err := r.reader.ReadByte()
+
+	if err != nil {
+		return Value{}, err
+	}
+
+	switch _type {
+	case ARRAY:
+		return r.readArray()
+	case BULK:
+		return r.readBulk()
+	default:
+		fmt.Printf("نوع غير معروف: %v", string(_type))
+		return Value{}, nil
+	}
+}
+```
+
+كما قمنا في الخطوة الأولى بقراءة البايت الأول لمعرفة نوع أمر RESP الذي سنقوم بتحليله. ثم قمنا بكتابة switch وحسب النوع سنبدأ في تحليله.
+
+حالياً، سنكتفي بتحليل الـ Array والـ Bulk.
+
+الآن سنقوم بكتابة readArray لأنه هو أول أمر يأتينا من العميل دائمًا.
+
+قبل أن نكتب الوظيفة، تذكر أن أمر RESP للـ array يكون بهذا الشكل:
+
+```bash
+*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n
+```
+
+لتسهيل الأمر وتوضيحه، يمكننا تقسيمه إلى أسطر بدلاً من \r\n.
+
+```bash
+*2
+$5
+hello
+$5
+world
+```
+
+لذا، لقراءة الـ Array، سنقوم بالخطوات التالية:
+
+- نقرأ البايت الأول لأننا قرأناه بالفعل في وظيفة القراءة
+- نقرأ العدد الذي يعبر عن عدد العناصر التي ستأتي في الـ array
+- نقوم بعمل حلقة (loop) على الـ array ولكل سطر نقوم بقراءة القيمة باستخدام وظيفة القراءة لتحليل النوع وفقًا للحرف في بداية السطر
+- ومع كل حلقة، نقوم بإضافة القيمة المحللة إلى الـ array في كائن القيمة ونعيدها
+
+```go
+func (r *Resp) readArray() (Value, error) {
+	v := Value{}
+	v.typ = "array"
+
+	// قراءة طول الـ array
+	len, _, err := r.readInteger()
+	if err != nil {
+		return v, err
+	}
+
+	// لكل سطر، قم بتحليل وقراءة القيمة
+	v.array = make([]Value, 0)
+	for i := 0; i < len; i++ {
+		val, err := r.Read()
+		if err != nil {
+			return v, err
+		}
+
+		// إضافة القيمة المحللة إلى الـ array
+		v.array = append(v.array, val)
+	}
+
+	return v, nil
+}
+```
+
+الآن يجب على RESP.go أن يكتمل حتى يعمل التحليل (parsing) لأوامر RESP ويمكننا تغيير الـ main.go لقراءة الأوامر.
+
+```go
+package main
+
+import (
+	"fmt"
+	"net"
+)
+
+func main() {
+	fmt.Println("الاستماع على المنفذ :6379")
+
+	// إنشاء خادم جديد
+	l, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// الاستماع للاستعلامات
+	conn, err := l.Accept()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	for {
+		resp := NewResp(conn)
+		value, err := resp.Read()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		fmt.Println(value)
+
+		// تجاهل الطلب وإرسال PONG
+		conn.Write([]byte("+OK\r\n"))
+	}
+}
+```
+
+إذا قمنا بتجربة الاتصال من خلال redis-cli، سنرى الناتج كالتالي:
+
+![cli output](/images/build-redis-from-scratch/part-2/cli-output.png)
+
+تجاهل السطر الثاني لأن redis-cli يرسل [COMMAND DOCS](https://redis.io/commands/command-docs/) عند الاتصال وسنتجاهله الآن.
+
+إذا نظرت إلى السطر الثالث.. ستجد أن قيمة الـ Value تحتوي على نفس عدد السلاسل التي أرسلناها من redis-cli على اليمين.
+
+الجزء التالي سنقوم بتسلسل الرد (response) للـ Value على الـ Writer ونرد على العميل، ومن ثم يمكننا تنفيذ أوامر Redis.
